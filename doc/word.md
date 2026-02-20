@@ -23,6 +23,9 @@
 - 중앙 블록 윈도우 (`mission-overlay`)
 : 오류 해제 퀴즈 팝업. 잠금 해제 전까지 진행을 막는 핵심 UI.
 
+- 오류 창 헤더 (`mission-clause`)
+: 팝업 좌측 상단 라벨. 현재 고정 표기는 `ERROR WINDOW`.
+
 - 팝업 상태 라인 (`mission-tip`)
 : 퀴즈 입력 피드백(EXACT/MISPLACED/INVALID, 입력 오류)를 한 줄로 표시하는 영역.
 
@@ -56,7 +59,7 @@
 : 인트로 로그 재생 단계.
 
 - 계속 대기 (`WAIT_CONTINUE`)
-: `Enter를 눌러 계속` 대기 단계.
+: 오프닝 직후 오류 감지로 넘어가기 전의 내부 전이 단계(즉시 통과).
 
 - 스트리밍 (`STREAMING`)
 : 유언장 텍스트가 이어지고 일반 입력이 가능한 단계.
@@ -75,14 +78,23 @@
 - 유언장 스트림 로그
 : `terminal-log`에 쌓이는 본문/시스템 로그.
 
-- 차단 알림 (`[DECRYPTION REQUIRED] ...`)
-: 현재 블록이 잠겼음을 알리는 터미널 경고 로그.
+- 차단 알림 (`[ERROR] Corrupted block detected ...`)
+: 현재 블록 손상을 알리는 임시 오류 로그(`log-transient-lock`).
 
-- 행동 안내 (`[ACTION] Enter ...`)
-: 퀴즈 창 오픈 트리거 안내 로그.
+- 오류 감지 로그 (`[ERROR] Corrupted block detected ...`)
+: 문서 읽기 도중 복구가 필요한 지점을 알리는 로그.
+
+- 행동 안내 (`[ACTION] PRESS ENTER TO OPEN RECOVERY WINDOW`)
+: 오류 복구 팝업 오픈 트리거 안내 로그.
+
+- 복구 후 본문 재개 로그 (`[WILL] ...`)
+: 복구 성공 직후 다시 읽히는 유언장 본문 라인.
 
 - 퀴즈 피드백 라인
 : `mission-tip`에 현재 슬롯 안내와 판정 피드백을 단문으로 표시.
+
+- 고정 슬롯 (`lockedFormulaSlots`)
+: `hit-correct`로 확정된 위치를 다음 시도에서도 유지하는 슬롯 상태.
 
 ## 4) 판정 용어
 
@@ -109,6 +121,7 @@
 ## 6) 커뮤니케이션 예시 문장
 
 - "Clause 진입 후 `QUIZ_PENDING`에서 터미널에 차단 로그를 먼저 보여준다."
+- "오프닝 본문을 읽다가 `[ERROR]` 임시 로그가 뜨면 `QUIZ_PENDING`으로 진입한다."
 - "사용자 Enter 이벤트로 `QUIZ_LOCKED`로 전환하고 `mission-overlay`를 연다."
 - "퀴즈 판정 피드백은 `mission-tip` 한 줄로 유지한다."
-- "유언장 본문은 `terminal-log`에만 출력한다."
+- "복구 성공 시 임시 오류 로그를 지우고 `[WILL]` 라인으로 읽기를 재개한다."

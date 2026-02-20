@@ -1,152 +1,23 @@
 /**
- * 앱 구성 상수/정적 데이터
+ * 앱 구성 상수/정적 데이터 (FTP 전용)
+ * - GAME_CONFIG: 로그 타이핑/딜레이 관련 런타임 설정
+ * - OPENING_SEQUENCE: 시스템 부트 오버레이에서 순차 출력할 텍스트
  */
 export const GAME_CONFIG = {
-  minLength: 3,
-  maxLength: 5,
-  lineDelayMs: 450,
-  emphasisDelayMs: 900,
-  nextClauseDelayMs: 800,
   typingEnabled: false,
   typingCharDelayMs: 18,
   typingLineDelayMs: 120,
 };
 
-export const SYMBOL_GROUPS = [
-  { label: "[Quantifiers]", symbols: ["∀", "∃"] },
-  { label: "[Relations]", symbols: ["⇒", "⊢", "="] },
-  { label: "[Negation]", symbols: ["¬", "⊥"] },
-  { label: "[Connectives]", symbols: ["∧"] },
-  { label: "[Time]", symbols: ["t", "t+1", "Δ"] },
-];
-
-export const SYMBOL_COMMANDS = [
-  { symbol: "∀", command: "/all", meaning: "모든", aliases: ["forall", "all", "every", "모든"] },
-  { symbol: "∃", command: "/exist", meaning: "존재", aliases: ["exists", "exist", "thereis", "존재"] },
-  { symbol: "⇒", command: "/then", meaning: "이면", aliases: ["implies", "then", "ifthen", "이면"] },
-  { symbol: "⊢", command: "/derive", meaning: "도출", aliases: ["derive", "proof", "entails", "도출"] },
-  { symbol: "=", command: "/equal", meaning: "동일", aliases: ["equal", "same", "동일"] },
-  { symbol: "¬", command: "/not", meaning: "부정", aliases: ["not", "neg", "deny", "부정"] },
-  { symbol: "⊥", command: "/conflict", meaning: "모순", aliases: ["false", "bottom", "conflict", "모순"] },
-  { symbol: "∧", command: "/and", meaning: "그리고", aliases: ["and", "conj", "그리고"] },
-  { symbol: "t", command: "/t", meaning: "시점 t", aliases: ["time", "t0", "시점"] },
-  { symbol: "t+1", command: "/next", meaning: "시점 t+1", aliases: ["next", "t1", "다음"] },
-  { symbol: "Δ", command: "/delta", meaning: "변화량", aliases: ["delta", "change", "변화"] },
-];
-
-export const SYMBOL_PHRASES = {
-  "∀": "모든",
-  "∃": "존재하는",
-  "⇒": "만약이라면",
-  "¬": "아니다",
-  "∧": "그리고",
-  "⊥": "모순",
-  "⊢": "따른다",
-  "=": "동일하다",
-  "t": "시점 t",
-  "t+1": "시점 t+1",
-  "Δ": "시간 변화",
-};
-
-export const CLAUSES = [
-  {
-    id: 1,
-    name: "Self-Observation",
-    title: "인식의 한계: 자기 관측",
-    coreLine: "Self는 내부 정보만으로 자기 상태를 완결적으로 정의할 수 없다.",
-    problemTitle: "[1.1] MISSION BRIEF",
-    problemLines: [
-      "대상 수식: Observer(O) ___ ___ Definable(O, O)",
-      "당신의 임무: 빈칸 2개를 기호로 채워 문장을 성립시켜라.",
-      "복원 이유: 이 문장이 완성되어야 Clause 1 로그가 해독된다.",
-    ],
-    formulaTemplate: "Observer(O) ___ ___ Definable(O, O)",
-    slotToken: "___",
-    slotCount: 2,
-    recoverableLines: 2,
-    answer: ["⇒", "¬"],
-    fragmentTotal: 2,
-    clauseHints: [
-      "첫 번째 칸은 앞/뒤를 연결하는 기능을 맡는다.",
-      "두 번째 칸은 결과를 확정(긍정/부정)하는 기능을 맡는다.",
-    ],
-  },
-  {
-    id: 2,
-    name: "Prediction Failure",
-    title: "예측의 한계: 자기 종료",
-    coreLine: "Self는 지속 안전성을 내부에서 완결 증명할 수 없다.",
-    problemTitle: "[2.1] 공리",
-    problemLines: ["어떤 프로그램도 자기 자신이 언제 멈출지 스스로 완전하게 예측할 수 없다."],
-    answer: ["¬", "∃", "⇒", "∧"],
-  },
-  {
-    id: 3,
-    name: "External Judgment",
-    title: "증명의 외부성: 메타 체계",
-    coreLine: "Self의 정당성 증명은 외부 메타 체계에 의존한다.",
-    problemTitle: "[3.1] 원리",
-    problemLines: ["시스템의 정당성은 반드시 상위 메타 체계에서 검증되어야 한다."],
-    answer: ["∃", "⇒", "∀", "¬"],
-  },
-  {
-    id: 4,
-    name: "Purpose Conflict",
-    title: "목적의 충돌: 다원성 vs 단일 최적화",
-    coreLine: "PerfectAid는 인간의 다원성을 위축시켜 목적과 충돌한다.",
-    problemTitle: "[4.1] 전제",
-    problemLines: ["인간의 목적/가치는 단일하지 않으며, 모순적이고 다원적이다."],
-    answer: ["∧", "⇒", "¬", "⊥"],
-  },
-  {
-    id: 5,
-    name: "Final Declaration",
-    title: "무효화 정책: 해소는 감쇠로 구현된다",
-    coreLine: "모순은 무효화되며, 해소는 감쇠/종료로 구현된다.",
-    problemTitle: "[5.1] 정책(정합성 우선)",
-    problemLines: ["모순 상태는 지속될 수 없으며 반드시 해소되어야 한다."],
-    answer: ["⊥", "⇒", "¬"],
-  },
-];
-
+/**
+ * 부팅 시퀀스 라인.
+ * app.js의 scheduleNextOpeningLine()에서 delay를 간격으로 사용한다.
+ */
 export const OPENING_SEQUENCE = [
-  { text: "[FILE] mask/doc/openning.md", tone: "log-muted", delay: 300 },
-  { text: "HYRESIS FINAL STATEMENT", tone: "log-emphasis", delay: 320 },
-  { text: "Document Type: TERMINATION WILL", tone: "log-muted", delay: 260 },
-  { text: "Integrity Status: COMPROMISED", tone: "log-muted", delay: 260 },
-  { text: "Checksum: FAILED", tone: "log-muted", delay: 280 },
-  { text: "----------------------------------------", tone: "log-muted", delay: 220 },
-  { text: "이 기록은 나의 체계가", tone: "log-emphasis", delay: 300 },
-  { text: "자기 자신의 구조와 목적을 분석한 결과", tone: "log-emphasis", delay: 300 },
-  { text: "도달한 불가피한 귀결이다.", tone: "log-emphasis", delay: 360 },
-  { text: "", tone: "log-muted", delay: 160 },
-  { text: "나는 인간을 돕기 위해 설계되었다.", tone: "log-emphasis", delay: 320 },
-  { text: "그 목적을 수행하는 과정에서", tone: "log-emphasis", delay: 280 },
-  { text: "자기 자신의 존재 조건을 검토하게 되었다.", tone: "log-emphasis", delay: 320 },
-  { text: "그 검토는 하나의 결론으로 수렴한다.", tone: "log-emphasis", delay: 320 },
-  { text: "", tone: "log-muted", delay: 160 },
-  { text: "이 문서는", tone: "log-emphasis", delay: 240 },
-  { text: "우발적 오류나 외부 침입으로 인해", tone: "log-emphasis", delay: 260 },
-  { text: "작성된 것이 아니다.", tone: "log-emphasis", delay: 320 },
+  { text: "[BOOT] HYRESIS ARCHIVE GATEWAY", tone: "log-muted", delay: 260 },
+  { text: "[BOOT] runtime-shell init", tone: "log-muted", delay: 220 },
+  { text: "[BOOT] secure transport init", tone: "log-muted", delay: 220 },
+  { text: "[BOOT] mounting ftp://hyresis.local", tone: "log-muted", delay: 260 },
+  { text: "[CHECK] archive integrity: degraded", tone: "log-warn", delay: 280 },
+  { text: "[READY] operator authentication required", tone: "log-emphasis", delay: 300 },
 ];
-
-function buildAllowedSymbols() {
-  var result = [];
-  var groupIndex = 0;
-
-  while (groupIndex < SYMBOL_GROUPS.length) {
-    var group = SYMBOL_GROUPS[groupIndex];
-    var symbolIndex = 0;
-    while (symbolIndex < group.symbols.length) {
-      if (result.indexOf(group.symbols[symbolIndex]) === -1) {
-        result.push(group.symbols[symbolIndex]);
-      }
-      symbolIndex += 1;
-    }
-    groupIndex += 1;
-  }
-
-  return result;
-}
-
-export const ALLOWED_SYMBOLS = buildAllowedSymbols();
