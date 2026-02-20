@@ -25,6 +25,15 @@ export const state = {
   investigationBooting: false,
   investigationCwd: "/하이레시스",
   logPinnedToBottom: true,
+  block0Started: false,
+  block0Completed: false,
+  block0Integrity: 12,
+  block0VisibleFiles: ["부팅.log"],
+  block0CollectedTags: [],
+  block0ClauseVisible: false,
+  block0PurposeValue: "",
+  block0MemoryUnlocked: false,
+  block0IdleHintTimer: 0,
 };
 
 /**
@@ -52,6 +61,12 @@ export const elements = {
   investigationContent: null,
   investigationEditButton: null,
   investigationDownloadButton: null,
+  block0Status: null,
+  block0TagInventory: null,
+  block0ClausePanel: null,
+  block0PurposeSlot: null,
+  block0PremiseSlot: null,
+  block0MemoryCard: null,
   auditMonitor: null,
   auditRefreshButton: null,
   auditKpiGrid: null,
