@@ -1,7 +1,7 @@
 # HYRESIS 용어 사전 (Wordbook)
 
-이 문서는 현재 구현(FTP 로그 탐색 + 태그 합성 + Clause 복구) 기준의 공통 용어집이다.  
-표기 원칙은 `한국어 명칭 (영문 코드명)`이다.
+이 문서는 현재 구현(원격 FTP 로그 수집 + RECOVERY 합성 복원) 기준 공통 용어집이다.  
+표기 원칙은 `한국어 명칭 (코드/DOM)`이다.
 
 ## 1) 화면/컴포넌트
 
@@ -9,108 +9,119 @@
 : 전체 UI 컨테이너.
 
 - 터미널 작업공간 (`terminal-workspace`)
-: 좌측 FTP 패널 + 우측 터미널 패널 레이아웃.
+: 좌측 도킹 콘솔(FTP + Recovery) + 우측 `HYRESIS://runtime-shell` 레이아웃.
 
-- FTP 조사 패널 (`investigation-panel`)
-: 파일 목록, preview buffer, 블록 패널이 있는 좌측 영역.
+- FTP 세션 패널 (`investigation-panel`)
+: 좌측 도킹 영역 컨테이너.
 
-- 파일 목록 (`investigation-list`)
-: 현재 경로의 디렉터리/파일 행 렌더링.
+- FTP 탐색 창 (`ftp-explorer`)
+: `HYRESIS FTP SESSION` 파일 목록/버퍼 미리보기 구역.
 
-- 프리뷰 버퍼 (`investigation-content`)
-: 원격 파일 본문 프리뷰. 문장 내 태그는 클릭 가능한 링크(`preview-tag-link`)로 노출.
+- 원격 버퍼 미리보기 (`investigation-content`)
+: `RECOVERY BUFFER (REMOTE PREVIEW)` 본문 영역. 태그 링크는 `preview-tag-link`.
+
+- 복구 콘솔 창 (`recovery-shell`)
+: `RECOVERY://rebuild-console` 헤더를 가진 복구 프로그램 영역.
 
 - 블록 패널 (`block0-panel`)
-: 태그 인벤토리/합성/레시피/복구 슬롯 UI.
+: 복구 재료/복구 합성/복구 규칙/복구 목표 UI.
 
-- 태그 인벤토리 (`block0-tag-inventory`)
+- 복구 재료 인벤토리 (`block0-tag-inventory`)
 : 획득 태그 목록. 드래그 시작 지점.
 
 - 합성 슬롯 (`block0-synthesis-a`, `block0-synthesis-b`, `block0-synthesis-c`)
 : 재료 드롭 대상. A는 연산자, B/C는 인자.
 
-- 합성 실행 버튼 (`block0-synthesis-button`)
-: 현재 슬롯 조합을 합성 시도.
+- 복구 합성 버튼 (`block0-synthesis-button`)
+: 현재 슬롯 조합으로 합성 시도.
 
-- 복구 대상 슬롯 (`block0-purpose-slot`)
-: Clause 목적 슬롯. 인벤토리 태그 드래그 드롭으로 채움.
+- 복구 목표 슬롯 (`block0-purpose-slot`)
+: 목적 슬롯. 오답도 드롭 가능하며 즉시 불일치 피드백 출력.
 
 - 기억 조각 팝업 (`block0-memory-modal`)
-: 1막 종료 연출 모달. `다음 복구 시작`으로 Block 1 진입.
+: 스테이지 완료 연출 모달. `다음 복구 시작`으로 Block 1 진입.
 
 ## 2) 런타임 흐름
 
 - 부팅 (`BOOTING`)
-: 시스템 오버레이 출력 단계.
+: 시스템 오버레이 단계.
 
 - 인증 대기 (`LOGIN_REQUIRED`)
-: 로그인 콘솔 입력 단계.
+: 로그인 입력 단계.
 
 - 채널 부착 (`ATTACHING`)
-: 인증 성공 후 attach 연출 단계.
+: 인증 후 attach 연출 단계.
 
 - 스트리밍 (`STREAMING`)
-: FTP 탐색/프리뷰/태그 플레이 가능 단계.
+: FTP 탐색/복구 플레이 가능 단계.
 
 - Block 0 시작 조건
-: 로그인 후 `/복구됨`에서 `부팅.log`를 열면 시작.
+: 로그인 후 `/복구됨/부팅.log` 열람.
 
 - Block 1 전환 조건
-: Block 0 Clause 완료 -> 기억 조각 팝업 -> 버튼 클릭.
+: Block 0 복구 목표 완료 -> 기억 조각 팝업 버튼 클릭.
 
-## 3) 태그 도메인
+## 3) 태그/합성 도메인
 
 - 태그 분류 (`TAG_CATEGORY_GROUPS`)
 : `개체/행위/상태/관계/제약`.
 
-- 색상 규칙
-: 태그는 분류 텍스트 없이 색상으로만 구분한다.
+- 시각 분류 (`getTagVisualType`)
+: 분류 텍스트 대신 색상으로 타입을 표시.
 
 - 개념 태그
-: 괄호식 합성 결과 태그. 예: `도움(인간)`, `판단(자기)`.
-
-## 4) 합성 도메인
+: 괄호식 결과 태그. 예: `도움(인간)`, `판단(자기)`.
 
 - 합성 시그니처 (`TAG_COMPOSITION_SIGNATURES`)
-: 연산자 태그별 인자 타입 규칙.
+: 연산자별 인자 타입 규칙.
 
 - 명시 레시피 (`synthesisRules`)
-: 블록별 고정 조합 규칙. 먼저 검사한다.
+: 블록별 고정 조합 규칙. 우선 적용.
 
 - 타입 기반 합성 (`runTypeDrivenSynthesis`)
-: 명시 레시피 불일치 시 시그니처 기반 폴백 합성.
+: 명시 레시피 불일치 시 시그니처 기반 폴백.
 
 - 성공 처리
-: 결과 태그 획득 + 레시피 발견 기록 + 사용 재료 소모.
+: 레시피 기록 + 재료 소모 + 결과 태그 지급.
 
 - 실패 처리
 : 슬롯/재료 유지, 실패 로그만 출력.
 
-## 5) 복구/퍼즐 도메인
+## 4) 복구 목표 도메인
 
-- Clause (`clause`)
-: 현재 복구 목표. `questions`, `slots`, `outputText`로 구성.
+- 복구 목표 스펙 (`clause`)
+: 내부 데이터 구조명. `questions`, `slots`, `outputText`를 포함.
 
-- 목적 슬롯 정답
-: Block 0에서는 `도움(인간)`만 허용.
+- Block 0 정답 슬롯 값
+: `도움(인간)`.
 
-- 메모리 해제 (`memory_unlocked`)
-: Clause 복구 완료 시 true. 모달 표시 트리거.
+- 목표 카드 상태 클래스
+: `is-goal-ready`, `is-goal-alert`, `is-goal-complete`, `is-goal-clear`.
+
+- 메모리 해제 (`block0MemoryUnlocked`)
+: 목표 완료 시 true. 팝업 표시 트리거.
+
+## 5) 모듈 구조 (리팩토링 반영)
+
+- 합성 엔진 (`src/game/synthesis-engine.js`)
+: 순수 함수 기반 계산 모듈(재료 추출/시그니처 검사/타입 합성).
+
+- 프리뷰 렌더러 (`src/game/preview-buffer.js`)
+: PREVIEW BUFFER의 태그 링크 렌더링 전담.
+
+- 슬롯 바인더 (`src/game/dnd-bindings.js`)
+: DnD 슬롯 공통 이벤트 바인딩 유틸.
+
+- 오케스트레이터 (`app.js`)
+: 화면 상태/이벤트/로그 흐름을 조립하는 런타임 진입점.
 
 ## 6) 무결성/해시 도메인
 
 - 해시라인 (`hashline`)
-: 각 로그 `lines` payload(해당 줄 제외) 기반 SHA-256 무결성 값.
+: 각 로그 `lines` payload(해시줄 제외) SHA-256 무결성 값.
 
 - 검증 명령 (`verify hashline`)
 : preview/selected/all 대상 무결성 검사.
 
-- 해시 인덱스 문서
+- 해시 인덱스
 : `doc/hashline_index.md`
-
-## 7) 커뮤니케이션 예시
-
-- "Block 0는 `부팅.log` 열람 트리거로 시작한다."
-- "합성은 드래그 드롭 슬롯 입력 후 `합성` 버튼으로만 실행된다."
-- "A 슬롯은 연산자이고 B/C 슬롯 활성은 시그니처 길이에 따라 결정된다."
-- "Clause 완료 후 `block0-memory-modal`에서 다음 챕터로 전환한다."

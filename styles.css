@@ -140,21 +140,6 @@ body {
   letter-spacing: 0.1em;
 }
 
-.recovery-flow-guide {
-  border: 1px solid #2f4f52;
-  background: #0a1719;
-  color: #97c6c0;
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  padding: 4px 7px;
-}
-
-.recovery-flow-guide {
-  border-color: #5f5637;
-  background: #1a150b;
-  color: #dbc992;
-}
-
 .recovery-shell {
   border: 1px solid #6d5a34;
   background: #120f08;
@@ -453,9 +438,23 @@ body {
   cursor: grab;
 }
 
+.block0-tag-btn.collected.is-fusion-operator {
+  box-shadow: inset 0 0 0 1px rgba(171, 239, 198, 0.22);
+  animation: fusion-operator-pulse 2.4s ease-in-out infinite;
+}
+
 .block0-tag-btn.collected.is-dragging {
   opacity: 0.45;
   cursor: grabbing;
+}
+
+.block0-tag-btn.collected.is-fusion-target-candidate {
+  border-style: dashed;
+}
+
+.block0-tag-btn.collected.is-fusion-hover {
+  border-color: #9ed0ff;
+  background: #132734;
 }
 
 .block0-tag-btn.tag-cat-개체 {
@@ -581,84 +580,6 @@ body {
   color: #ffdce3;
 }
 
-.block0-synthesis {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.block0-syn-slot {
-  border: 1px solid #3a5b69;
-  background: #0f1f28;
-  color: #cfe5f0;
-  font-size: 12px;
-  padding: 5px 9px;
-  min-width: 96px;
-  text-align: center;
-  cursor: pointer;
-}
-
-.block0-syn-slot.is-disabled-slot {
-  opacity: 0.5;
-}
-
-.block0-syn-slot.tag-cat-개체 {
-  border-color: #58a6ff;
-  background: #102539;
-  color: #d6e9ff;
-}
-
-.block0-syn-slot.tag-cat-행위 {
-  border-color: #57d89f;
-  background: #0f2a20;
-  color: #d3f7e7;
-}
-
-.block0-syn-slot.tag-cat-상태 {
-  border-color: #f0bf58;
-  background: #372c12;
-  color: #ffeec9;
-}
-
-.block0-syn-slot.tag-cat-관계 {
-  border-color: #b38cff;
-  background: #271b3c;
-  color: #e9deff;
-}
-
-.block0-syn-slot.tag-cat-제약 {
-  border-color: #ff7f96;
-  background: #3d1c23;
-  color: #ffdbe2;
-}
-
-.block0-syn-slot.tag-cat-개념 {
-  border-color: #7ea0b3;
-  background: #1f2b31;
-  color: #d8e3ea;
-}
-
-.block0-syn-plus {
-  color: #96b9c7;
-  font-size: 12px;
-}
-
-.block0-syn-run {
-  border: 1px solid #456d7d;
-  background: #12303d;
-  color: #d5ebf5;
-  font-size: 12px;
-  padding: 5px 11px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.block0-syn-run:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .block0-recipe-list {
   border: 1px solid #2e4551;
   background: #0c171d;
@@ -668,19 +589,6 @@ body {
   min-height: 38px;
   line-height: 1.45;
   white-space: pre-line;
-}
-
-.block0-memory {
-  border: 1px solid #4a5567;
-  background: #111821;
-  color: #dbe7fb;
-  font-size: 12px;
-  line-height: 1.45;
-  padding: 7px;
-}
-
-.block0-memory.is-hidden {
-  display: none;
 }
 
 /* ---------------------------------------
@@ -1292,6 +1200,15 @@ body {
   100% {
     border-color: #5fba97;
     box-shadow: inset 0 0 0 1px rgba(137, 228, 185, 0.4), 0 0 0 1px rgba(95, 186, 151, 0.3);
+  }
+}
+
+@keyframes fusion-operator-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px rgba(171, 239, 198, 0.16);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px rgba(198, 255, 222, 0.44);
   }
 }
 
