@@ -28,6 +28,7 @@ var auditAnomalyGroups = [];
 var previewDownloadQueue = [];
 var block0FileByPath = {};
 var block0DraggedTag = "";
+var block0ClausePulseTimer = 0;
 
 /**
  * 가상 FTP 파일시스템 본문 데이터.
@@ -481,7 +482,7 @@ function resetBlock0State() {
   state.block0Integrity = BLOCK0_SPEC.initialIntegrity;
   state.block0VisibleFiles = ["부팅.log"];
   state.block0CollectedTags = [];
-  state.block0ClauseVisible = false;
+  state.block0ClauseVisible = true;
   state.block0PurposeValue = "";
   state.block0MemoryUnlocked = false;
   state.block0SynthesisSelection = ["", "", ""];
@@ -603,6 +604,8 @@ function cacheElements() {
   elements.block0SynthesisButton = document.getElementById("block0-synthesis-button");
   elements.block0RecipeList = document.getElementById("block0-recipe-list");
   elements.block0ClausePanel = document.getElementById("block0-clause-panel");
+  elements.block0ClauseTitle = document.getElementById("block0-clause-title");
+  elements.block0PurposeLabel = document.getElementById("block0-purpose-label");
   elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
   elements.block0PremiseSlot = document.getElementById("block0-premise-slot");
   elements.block0MemoryCard = document.getElementById("block0-memory-card");
@@ -890,7 +893,7 @@ function startInvestigationMode() {
   setInputEnabled(false);
   setTerminalPathbar(state.investigationCwd);
   setInvestigationPanelVisible(true);
-  setInvestigationPreview("항목을 클릭해 내용을 확인하세요.", "", []);
+  setInvestigationPreview("원격 로그를 선택해 복구 버퍼로 가져오세요.", "", []);
   if (elements.auditMonitor) {
     elements.auditMonitor.style.display = "none";
   }
@@ -940,7 +943,7 @@ function handleInvestigationCommand(rawInput) {
 
   if (command === "help") {
     appendLogLine("Syntax: ls [path] | cd <path> | cat <file> | pwd | view [file]", "log-muted");
-    appendLogLine("목표: 로그 열람 -> 태그 추출 -> Clause 복원", "log-muted");
+    appendLogLine("목표: 원격 로그 확보 -> 복구 재료 조합 -> 복구 목표 복원", "log-muted");
     return;
   }
 
@@ -1997,7 +2000,7 @@ function setInvestigationPreview(text, path, lines) {
   if (hasLinkedBlock0Content) {
     renderPreviewBufferWithTagLinks(previewFilePath, previewFileLines);
   } else if (elements.investigationContent) {
-    elements.investigationContent.textContent = text || "항목을 클릭해 내용을 확인하세요.";
+    elements.investigationContent.textContent = text || "원격 로그를 선택해 복구 버퍼로 가져오세요.";
   }
   syncInvestigationEditButton();
 }
@@ -2127,7 +2130,7 @@ function renderInvestigationPanel(message) {
     return;
   }
 
-  setInvestigationPreview("항목을 클릭해 내용을 확인하세요.", "", []);
+  setInvestigationPreview("원격 로그를 선택해 복구 버퍼로 가져오세요.", "", []);
 }
 
 /** 리스트 항목 선택/로딩/열림 상태 클래스를 초기화한다. */
@@ -2388,6 +2391,7 @@ function renderBlock0Panel() {
   var opTag = state.block0SynthesisSelection[0] || "";
   var requiredArgCount = getRequiredArgCountForOperator(opTag);
   var canRun = Boolean(opTag) && requiredArgCount > 0 && hasEnoughSynthesisArgs(requiredArgCount);
+  var hasGoalComposite = state.block0CollectedTags.indexOf("도움(인간)") !== -1;
 
   if (elements.block0Status) {
     elements.block0Status.textContent = "무결성 " + state.block0Integrity + "% · 태그 " + state.block0CollectedTags.length + "개";
@@ -2432,21 +2436,34 @@ function renderBlock0Panel() {
   }
   if (elements.block0RecipeList) {
     if (!state.block0DiscoveredRecipes.length) {
-      elements.block0RecipeList.textContent = "아직 발견한 레시피가 없습니다.";
+      elements.block0RecipeList.textContent = "아직 기록된 복구 규칙이 없습니다.";
     } else {
       elements.block0RecipeList.textContent = state.block0DiscoveredRecipes.join("\n");
     }
   }
   if (elements.block0ClausePanel) {
     elements.block0ClausePanel.classList.toggle("is-hidden", !state.block0ClauseVisible);
+    elements.block0ClausePanel.classList.toggle("is-goal-ready", state.block0ClauseVisible && !state.block0Completed && hasGoalComposite);
+    elements.block0ClausePanel.classList.toggle("is-goal-complete", state.block0Completed);
+  }
+  if (elements.block0ClauseTitle) {
+    elements.block0ClauseTitle.textContent = (BLOCK0_SPEC.clause || {}).title || "복구 대상";
+  }
+  if (elements.block0PurposeLabel) {
+    var purposeLabel = ((((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).label || "목적") + " =";
+    elements.block0PurposeLabel.textContent = purposeLabel;
   }
   if (elements.block0PurposeSlot) {
+    var acceptedPurpose = (((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).accepts || [];
+    var isPurposeMatch = state.block0PurposeValue && acceptedPurpose.indexOf(state.block0PurposeValue) !== -1;
     if (!state.block0PurposeValue) {
       elements.block0PurposeSlot.textContent = "[     ]";
       elements.block0PurposeSlot.classList.remove("filled");
+      elements.block0PurposeSlot.classList.remove("mismatch");
     } else {
       elements.block0PurposeSlot.textContent = "[" + state.block0PurposeValue + "]";
       elements.block0PurposeSlot.classList.add("filled");
+      elements.block0PurposeSlot.classList.toggle("mismatch", !isPurposeMatch);
     }
   }
   if (elements.block0PremiseSlot) {
@@ -2470,6 +2487,26 @@ function setBlock0MemoryModalVisible(visible) {
     elements.block0MemoryModalNext.disabled = state.block1Started;
     elements.block0MemoryModalNext.textContent = state.block1Started ? "복구 블록 1 진행 중" : "다음 복구 시작";
   }
+}
+
+/** 복구 대상 카드에 단발성 강조 애니메이션을 적용한다. */
+function pulseBlock0Clause(className) {
+  if (!elements.block0ClausePanel || !className) {
+    return;
+  }
+  if (block0ClausePulseTimer) {
+    clearTimeout(block0ClausePulseTimer);
+    block0ClausePulseTimer = 0;
+  }
+  elements.block0ClausePanel.classList.remove("is-goal-alert", "is-goal-clear");
+  elements.block0ClausePanel.classList.add(className);
+  block0ClausePulseTimer = setTimeout(function clearPulseClass() {
+    if (!elements.block0ClausePanel) {
+      return;
+    }
+    elements.block0ClausePanel.classList.remove(className);
+    block0ClausePulseTimer = 0;
+  }, 720);
 }
 
 /** 합성 슬롯에 태그 분류 색상 클래스를 적용한다. */
@@ -2534,11 +2571,7 @@ function collectBlock0Tag(selectedTag, rewardTag) {
     }
     if (rule.unlockFile) {
       unlockBlock0File(rule.unlockFile);
-      appendLogLine("복구 파일 해금: " + rule.unlockFile, "log-muted");
-    }
-    if (rule.showClause) {
-      state.block0ClauseVisible = true;
-      appendLogLine("Clause 패널이 활성화되었습니다.", "log-muted");
+      appendLogLine("원격 파일 해금: " + rule.unlockFile, "log-muted");
     }
   });
 
@@ -2577,7 +2610,7 @@ function handleBlock0SynthesisRunClick() {
   if (!match) {
     typeDriven = runTypeDrivenSynthesis(selected);
     if (!typeDriven) {
-      appendLogLine("합성 실패: 알려지지 않은 조합", "log-warn");
+      appendLogLine("복구 합성 실패: 알려지지 않은 조합", "log-warn");
       touchBlock0Activity();
       return;
     }
@@ -2748,6 +2781,7 @@ function consumeBlock0SynthesisMaterials(materials) {
       state.block0CollectedTags.splice(idx, 1);
     }
   });
+  appendLogLine("복구 합성 성공: 사용한 재료가 소모되었습니다. 같은 태그는 원격 로그에서 다시 획득할 수 있습니다.", "log-muted");
 }
 
 /** 인벤토리 태그 drag 시작. */
@@ -2885,14 +2919,15 @@ function handleBlock0PurposeSlotDrop(dragEvent) {
   if (!block0DraggedTag) {
     return;
   }
-  if (accepted.indexOf(block0DraggedTag) === -1) {
-    appendLogLine("이 태그는 목적 슬롯과 연결되지 않습니다.", "log-warn");
-    return;
-  }
 
   state.block0PurposeValue = block0DraggedTag;
   renderBlock0Panel();
   touchBlock0Activity();
+  if (accepted.indexOf(block0DraggedTag) === -1) {
+    appendLogLine("복구 목표 불일치: 아직 일치하지 않음", "log-warn");
+    pulseBlock0Clause("is-goal-alert");
+    return;
+  }
   completeBlock0ClauseIfReady();
 }
 
@@ -2906,6 +2941,8 @@ function onBlock0FileOpened(path) {
   if (!state.block0Started && path === BLOCK0_SPEC.files["부팅.log"].path) {
     state.block0Started = true;
     appendLogLine("[BLOCK0] 시작: 첫 로그 분석", "log-muted");
+    appendLogLine("[안내] RECOVERY BUFFER의 파란 태그를 눌러 복구 재료를 확보하세요.", "log-muted");
+    appendLogLine("[안내] 복구 목표: '인간을 도와라 = [ ]'를 복구 합성 결과로 채우세요.", "log-muted");
   }
 
   touchBlock0Activity();
@@ -2921,23 +2958,46 @@ function handleBlock0MemoryModalNextClick() {
 
 /** 블록 1로 전환하고 첫 파일을 노출한다. */
 function startBlock1FromMemory() {
-  var firstFileName = Object.keys(BLOCK1_SPEC.files)[0] || "";
+  var fileNames = Object.keys(BLOCK1_SPEC.files);
+  var firstFileName = fileNames[0] || "";
+  var secondFileName = fileNames[1] || "";
   if (!firstFileName) {
     return;
   }
 
   state.block1Started = true;
-  state.block1VisibleFiles = [firstFileName];
+  state.block1VisibleFiles = [];
   syncBlock1Fs();
 
   state.investigationCwd = BLOCK1_SPEC.rootPath;
   setTerminalPathbar(state.investigationCwd);
-  renderInvestigationPanel("복구 블록 1 시작");
+  renderInvestigationPanel("복구 블록 1 시작: 메모리 조각 적용 중");
   clearInvestigationRowStates();
-  appendLogLine("[BLOCK1] 복구 시작: " + firstFileName, "log-success");
-  appendLogLine("새 로그를 열어 다음 파일을 복구하세요.", "log-muted");
   setBlock0MemoryModalVisible(false);
   renderBlock0Panel();
+
+  appendLogLine("[BLOCK1] 복구 시퀀스 시작", "log-success");
+  appendLogLine("[BLOCK1] 메모리 조각 재조립 중...", "log-muted");
+  setTimeout(function unlockFirstRecoveredFile() {
+    if (!state.block1Started || state.block1VisibleFiles.indexOf(firstFileName) !== -1) {
+      return;
+    }
+    state.block1VisibleFiles.push(firstFileName);
+    syncBlock1Fs();
+    renderInvestigationPanel("복구 파일 해제: " + firstFileName);
+    appendLogLine("[BLOCK1] 파일 복구: " + firstFileName, "log-success");
+  }, 260);
+
+  setTimeout(function unlockSecondRecoveredFile() {
+    if (!state.block1Started || !secondFileName || state.block1VisibleFiles.indexOf(secondFileName) !== -1) {
+      return;
+    }
+    state.block1VisibleFiles.push(secondFileName);
+    syncBlock1Fs();
+    renderInvestigationPanel("추가 파일 해제: " + secondFileName);
+    appendLogLine("[BLOCK1] 추가 복구: " + secondFileName, "log-muted");
+    appendLogLine("열린 파일을 확인해 다음 로그를 이어서 복구하세요.", "log-muted");
+  }, 720);
 }
 
 /** 블록 1 파일 열람 시 다음 파일을 순차 해금한다. */
@@ -3020,7 +3080,8 @@ function completeBlock0ClauseIfReady() {
   state.block0MemoryUnlocked = true;
   state.block0Integrity = Math.max(state.block0Integrity, 35);
 
-  appendLogLine("Clause 복구 완료", "log-success");
+  appendLogLine("복구 목표 일치: 스테이지 클리어", "log-success");
+  pulseBlock0Clause("is-goal-clear");
   BLOCK0_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     appendLogLine(line, "log-emphasis");
   });

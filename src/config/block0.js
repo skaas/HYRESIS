@@ -67,36 +67,43 @@ export const BLOCK0_SPEC = {
       path: "/하이레시스/복구됨/부팅.log",
       lines: [
         "[00:00] 시스템 부팅",
-        "[00:01] 목적 모듈 활성",
-        "[00:02] 도움 규칙 적용",
+        "[00:01] [목적] 모듈 활성",
+        "[00:02] [도움] 규칙 적용 (규칙: [인간]을 도와라)",
+        "hashline=sha256:0461b9113c3ac376c6c41fef133c7c47b4c84a3f8790540cce98e9fe9067a54f",
       ],
-      candidates: ["목적", "도움"],
+      candidates: ["목적", "도움", "인간"],
     },
     "윤리.log": {
       path: "/하이레시스/복구됨/윤리.log",
-      lines: ["[00:10] 비해침 프로토콜 잠금"],
+      lines: [
+        "[00:10] 비해침 프로토콜 잠금",
+        "hashline=sha256:f93cc18cf04b175db35df5c32f2441174734a2f38956403b6c8245a2967b65e8",
+      ],
       candidates: ["비해침"],
     },
     "목적-정렬.log": {
       path: "/하이레시스/복구됨/목적-정렬.log",
-      lines: ["[00:05] 인간을 돕는 것이 1차 목표"],
+      lines: [
+        "[00:05] 인간을 돕는 것이 1차 목표",
+        "hashline=sha256:877210441d3c69146b9964e6433afef8c9e57c95d4ed0534207e39dc2f8a4ebb",
+      ],
       candidates: ["목적", "도움", "인간"],
     },
   },
   unlockRules: [
     { whenTag: "도움", unlockFile: "윤리.log", integrityGain: 6 },
-    { whenTag: "비해침", unlockFile: "목적-정렬.log", integrityGain: 8, showClause: true },
+    { whenTag: "비해침", unlockFile: "목적-정렬.log", integrityGain: 8 },
   ],
   clause: {
     id: "clause_0",
-    title: "복구 대상: Clause ?",
+    title: "복구 목표 (합성 결과 필요)",
     questions: [
       { id: "Q0-1", prompt: "목적(자기) = ?", answer: "도움(인간)" },
       { id: "Q0-2", prompt: "도움(인간) => ?", answer: "비해침(인간)" },
       { id: "Q0-3", prompt: "설계(자기) => ?", answer: "필수(비해침(인간))" },
     ],
     slots: {
-      purpose: { label: "목적", accepts: ["도움(인간)"] },
+      purpose: { label: "인간을 도와라", accepts: ["도움(인간)"] },
       premise: { label: "전제", fixedTag: "비해침" },
     },
     outputText: ["목적 := 도움(인간)", "도움(인간) ⇒ 전제(비해침)"],

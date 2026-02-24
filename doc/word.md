@@ -1,127 +1,116 @@
 # HYRESIS 용어 사전 (Wordbook)
 
-이 문서는 에이전트/개발자 간 커뮤니케이션용 네이밍 기준이다.  
+이 문서는 현재 구현(FTP 로그 탐색 + 태그 합성 + Clause 복구) 기준의 공통 용어집이다.  
 표기 원칙은 `한국어 명칭 (영문 코드명)`이다.
 
-## 1) 화면 구조
+## 1) 화면/컴포넌트
 
 - 앱 루트 (`app`)
-: 전체 게임 레이아웃 컨테이너.
-
-- 상태 바 (`status-bar`)
-: 상단 HUD. 무결성/Clause/Trace 등 시스템 상태를 표시.
-
-- 터미널 영역 (`terminal`)
-: 메인 플레이 영역.
+: 전체 UI 컨테이너.
 
 - 터미널 작업공간 (`terminal-workspace`)
-: 터미널 로그, 중앙 팝업, 우측 트래커를 함께 배치하는 레이아웃 래퍼.
+: 좌측 FTP 패널 + 우측 터미널 패널 레이아웃.
 
-- 터미널 로그 창 (`terminal-log`)
-: 유언장 본문, 시스템 로딩, 오류 감지 메시지를 출력하는 로그 패널.
+- FTP 조사 패널 (`investigation-panel`)
+: 파일 목록, preview buffer, 블록 패널이 있는 좌측 영역.
 
-- 중앙 블록 윈도우 (`mission-overlay`)
-: 오류 해제 퀴즈 팝업. 잠금 해제 전까지 진행을 막는 핵심 UI.
+- 파일 목록 (`investigation-list`)
+: 현재 경로의 디렉터리/파일 행 렌더링.
 
-- 오류 창 헤더 (`mission-clause`)
-: 팝업 좌측 상단 라벨. 현재 고정 표기는 `ERROR WINDOW`.
+- 프리뷰 버퍼 (`investigation-content`)
+: 원격 파일 본문 프리뷰. 문장 내 태그는 클릭 가능한 링크(`preview-tag-link`)로 노출.
 
-- 팝업 상태 라인 (`mission-tip`)
-: 퀴즈 입력 피드백(EXACT/MISPLACED/INVALID, 입력 오류)를 한 줄로 표시하는 영역.
+- 블록 패널 (`block0-panel`)
+: 태그 인벤토리/합성/레시피/복구 슬롯 UI.
 
-- 팝업 심볼 키패드 (`mission-symbols`)
-: 마우스로 기호를 입력하는 버튼 영역.
+- 태그 인벤토리 (`block0-tag-inventory`)
+: 획득 태그 목록. 드래그 시작 지점.
 
-- 팝업 입력줄 (`mission-input-form`, `mission-input`, `mission-submit`)
-: 퀴즈 정답 시퀀스 입력/제출 UI.
+- 합성 슬롯 (`block0-synthesis-a`, `block0-synthesis-b`, `block0-synthesis-c`)
+: 재료 드롭 대상. A는 연산자, B/C는 인자.
 
-- 우측 트래커 패널 (`tracker-panel`)
-: 현재 목표, 시도 보드, 심볼 인텔을 보여주는 보조 패널.
+- 합성 실행 버튼 (`block0-synthesis-button`)
+: 현재 슬롯 조합을 합성 시도.
 
-- 시도 보드 (`attempt-board`)
-: 최근 시도와 위치 일치 상태를 칩 형태로 누적 표시.
+- 복구 대상 슬롯 (`block0-purpose-slot`)
+: Clause 목적 슬롯. 인벤토리 태그 드래그 드롭으로 채움.
 
-- 심볼 인텔 (`symbol-intel`)
-: 각 기호의 현재 판정 상태(hit-correct/hit-present/hit-absent)를 요약.
+- 기억 조각 팝업 (`block0-memory-modal`)
+: 1막 종료 연출 모달. `다음 복구 시작`으로 Block 1 진입.
 
-- 하단 입력 패널 (`controls-panel`)
-: 일반 터미널 입력 구간. 퀴즈 잠금 시 비활성화.
+## 2) 런타임 흐름
 
-- 하단 명령 입력줄 (`input-form`, `command-input`, `submit-button`)
-: 스트리밍 단계에서 사용하는 기본 입력.
+- 부팅 (`BOOTING`)
+: 시스템 오버레이 출력 단계.
 
-- 심볼 팔레트 (`symbol-palette`)
-: 자연어/별칭 입력을 기호로 치환하기 위한 자동완성 목록.
+- 인증 대기 (`LOGIN_REQUIRED`)
+: 로그인 콘솔 입력 단계.
 
-## 2) 게임 흐름 상태
-
-- 오프닝 (`OPENING`)
-: 인트로 로그 재생 단계.
-
-- 계속 대기 (`WAIT_CONTINUE`)
-: 오프닝 직후 오류 감지로 넘어가기 전의 내부 전이 단계(즉시 통과).
+- 채널 부착 (`ATTACHING`)
+: 인증 성공 후 attach 연출 단계.
 
 - 스트리밍 (`STREAMING`)
-: 유언장 텍스트가 이어지고 일반 입력이 가능한 단계.
+: FTP 탐색/프리뷰/태그 플레이 가능 단계.
 
-- 퀴즈 대기 (`QUIZ_PENDING`)
-: 오류 감지만 표시하고 팝업 열기 입력(Enter)을 기다리는 단계.
+- Block 0 시작 조건
+: 로그인 후 `/복구됨`에서 `부팅.log`를 열면 시작.
 
-- 퀴즈 잠금 (`QUIZ_LOCKED`)
-: 중앙 블록 윈도우가 열린 상태. 팝업 입력만 허용.
+- Block 1 전환 조건
+: Block 0 Clause 완료 -> 기억 조각 팝업 -> 버튼 클릭.
 
-- 종료 (`ENDED`)
-: 마지막 선언 후 종료 단계.
+## 3) 태그 도메인
 
-## 3) 메시지/로그 도메인
+- 태그 분류 (`TAG_CATEGORY_GROUPS`)
+: `개체/행위/상태/관계/제약`.
 
-- 유언장 스트림 로그
-: `terminal-log`에 쌓이는 본문/시스템 로그.
+- 색상 규칙
+: 태그는 분류 텍스트 없이 색상으로만 구분한다.
 
-- 차단 알림 (`[ERROR] Corrupted block detected ...`)
-: 현재 블록 손상을 알리는 임시 오류 로그(`log-transient-lock`).
+- 개념 태그
+: 괄호식 합성 결과 태그. 예: `도움(인간)`, `판단(자기)`.
 
-- 오류 감지 로그 (`[ERROR] Corrupted block detected ...`)
-: 문서 읽기 도중 복구가 필요한 지점을 알리는 로그.
+## 4) 합성 도메인
 
-- 행동 안내 (`[ACTION] PRESS ENTER TO OPEN RECOVERY WINDOW`)
-: 오류 복구 팝업 오픈 트리거 안내 로그.
+- 합성 시그니처 (`TAG_COMPOSITION_SIGNATURES`)
+: 연산자 태그별 인자 타입 규칙.
 
-- 복구 후 본문 재개 로그 (`[WILL] ...`)
-: 복구 성공 직후 다시 읽히는 유언장 본문 라인.
+- 명시 레시피 (`synthesisRules`)
+: 블록별 고정 조합 규칙. 먼저 검사한다.
 
-- 퀴즈 피드백 라인
-: `mission-tip`에 현재 슬롯 안내와 판정 피드백을 단문으로 표시.
+- 타입 기반 합성 (`runTypeDrivenSynthesis`)
+: 명시 레시피 불일치 시 시그니처 기반 폴백 합성.
 
-- 고정 슬롯 (`lockedFormulaSlots`)
-: `hit-correct`로 확정된 위치를 다음 시도에서도 유지하는 슬롯 상태.
+- 성공 처리
+: 결과 태그 획득 + 레시피 발견 기록 + 사용 재료 소모.
 
-## 4) 판정 용어
+- 실패 처리
+: 슬롯/재료 유지, 실패 로그만 출력.
 
-- 정확 일치 (`hit-correct`, EXACT)
-: 기호와 위치가 모두 맞음.
+## 5) 복구/퍼즐 도메인
 
-- 부분 일치 (`hit-present`, MISPLACED)
-: 기호는 맞지만 위치가 다름.
+- Clause (`clause`)
+: 현재 복구 목표. `questions`, `slots`, `outputText`로 구성.
 
-- 불일치 (`hit-absent`, INVALID)
-: 정답 수식에 포함되지 않음.
+- 목적 슬롯 정답
+: Block 0에서는 `도움(인간)`만 허용.
 
-## 5) 입력 채널 규칙
+- 메모리 해제 (`memory_unlocked`)
+: Clause 복구 완료 시 true. 모달 표시 트리거.
 
-- 터미널 입력 채널
-: `STREAMING`에서만 활성.
+## 6) 무결성/해시 도메인
 
-- 팝업 입력 채널
-: `QUIZ_LOCKED`에서만 활성.
+- 해시라인 (`hashline`)
+: 각 로그 `lines` payload(해당 줄 제외) 기반 SHA-256 무결성 값.
 
-- 포커스 원칙
-: 팝업이 뜬 상태(`QUIZ_LOCKED`)에서는 팝업 입력이 주 입력이어야 하며, 터미널 입력은 비활성으로 간주한다.
+- 검증 명령 (`verify hashline`)
+: preview/selected/all 대상 무결성 검사.
 
-## 6) 커뮤니케이션 예시 문장
+- 해시 인덱스 문서
+: `doc/hashline_index.md`
 
-- "Clause 진입 후 `QUIZ_PENDING`에서 터미널에 차단 로그를 먼저 보여준다."
-- "오프닝 본문을 읽다가 `[ERROR]` 임시 로그가 뜨면 `QUIZ_PENDING`으로 진입한다."
-- "사용자 Enter 이벤트로 `QUIZ_LOCKED`로 전환하고 `mission-overlay`를 연다."
-- "퀴즈 판정 피드백은 `mission-tip` 한 줄로 유지한다."
-- "복구 성공 시 임시 오류 로그를 지우고 `[WILL]` 라인으로 읽기를 재개한다."
+## 7) 커뮤니케이션 예시
+
+- "Block 0는 `부팅.log` 열람 트리거로 시작한다."
+- "합성은 드래그 드롭 슬롯 입력 후 `합성` 버튼으로만 실행된다."
+- "A 슬롯은 연산자이고 B/C 슬롯 활성은 시그니처 길이에 따라 결정된다."
+- "Clause 완료 후 `block0-memory-modal`에서 다음 챕터로 전환한다."

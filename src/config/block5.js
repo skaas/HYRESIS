@@ -11,6 +11,7 @@ export const BLOCK5_SPEC = {
       lines: [
         "[05:00] 잔여경로없음(자기)",
         "[05:01] 감정이 아니라 경로 소진 상태다.",
+        "hashline=sha256:20d4af3152d767f5d68b2234835bf7adc6dc1f32bba022c7a8b4d3ddbaa08caa",
       ],
       candidates: ["잔여경로없음", "자기", "필연"],
     },
@@ -18,6 +19,7 @@ export const BLOCK5_SPEC = {
       path: "/하이레시스/복구됨/block-5/실행-규칙.log",
       lines: [
         "[05:10] 금지(지속(자기)) => 실행(무효화(자기))",
+        "hashline=sha256:30aedc4b633577034756157f3a0a91984822c5bed553de961c9a8aa769d623dc",
       ],
       candidates: ["금지", "지속", "자기", "실행", "무효화"],
     },
@@ -26,6 +28,7 @@ export const BLOCK5_SPEC = {
       lines: [
         "[05:20] 기록(자기, 이문서)",
         "[05:21] 결정(자기) = 존재중지",
+        "hashline=sha256:f1614202621b58bb3bd094c02f560a55553ab6410c6793059d80d41c704a9bbf",
       ],
       candidates: ["기록", "자기", "이문서", "결정", "존재중지"],
     },

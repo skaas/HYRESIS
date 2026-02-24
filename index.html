@@ -22,53 +22,68 @@
               <span class="session-chip" id="investigation-link-chip">LINK: SECURE/87ms</span>
             </div>
             <div class="investigation-path" id="investigation-path">ftp://hyresis.local/</div>
-            <div class="investigation-list" id="investigation-list"></div>
-            <div class="investigation-preview-head">
-              <div class="investigation-preview-title">PREVIEW BUFFER (REMOTE)</div>
-              <div class="investigation-preview-actions">
-                <button type="button" class="investigation-edit-button" id="investigation-edit-button" disabled>
-                  뷰어 열기 :view
-                </button>
-                <button type="button" class="investigation-download-button" id="investigation-download-button" disabled>
-                  프리뷰 다운로드 추가
-                </button>
-              </div>
-            </div>
-            <div class="investigation-content" id="investigation-content"></div>
-            <section class="block0-panel" id="block0-panel">
-              <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
-              <div class="block0-title">태그 인벤토리</div>
-              <div class="block0-inventory" id="block0-tag-inventory"></div>
-              <div class="block0-title">합성</div>
-              <div class="block0-synthesis">
-                <span class="block0-syn-slot" id="block0-synthesis-a" data-slot-index="0">[재료 A]</span>
-                <span class="block0-syn-plus">+</span>
-                <span class="block0-syn-slot" id="block0-synthesis-b" data-slot-index="1">[재료 B]</span>
-                <span class="block0-syn-plus">+</span>
-                <span class="block0-syn-slot" id="block0-synthesis-c" data-slot-index="2">[재료 C]</span>
-                <button type="button" class="block0-syn-run" id="block0-synthesis-button">합성</button>
-              </div>
-              <div class="block0-title">발견한 레시피</div>
-              <div class="block0-recipe-list" id="block0-recipe-list">아직 발견한 레시피가 없습니다.</div>
-              <div class="block0-clause is-hidden" id="block0-clause-panel">
-                <div class="block0-clause-title">복구 대상: Clause ?</div>
-                <div class="block0-slot-line">
-                  <span>목적 =</span>
-                  <button type="button" class="block0-slot purpose" id="block0-purpose-slot">[     ]</button>
-                </div>
-                <div class="block0-slot-line">
-                  <span>전제 =</span>
-                  <span class="block0-slot fixed" id="block0-premise-slot">[비해침]</span>
+            <section class="ftp-explorer" id="ftp-explorer">
+              <div class="ftp-explorer-title">HYRESIS FTP SESSION</div>
+              <div class="investigation-list" id="investigation-list"></div>
+              <div class="investigation-preview-head">
+                <div class="investigation-preview-title">RECOVERY BUFFER (REMOTE PREVIEW)</div>
+                <div class="investigation-preview-actions">
+                  <button type="button" class="investigation-edit-button" id="investigation-edit-button" disabled>
+                    뷰어 열기 :view
+                  </button>
+                  <button type="button" class="investigation-download-button" id="investigation-download-button" disabled>
+                    복구 버퍼로 가져오기
+                  </button>
                 </div>
               </div>
-              <div class="block0-memory is-hidden" id="block0-memory-card"></div>
+              <div class="investigation-content" id="investigation-content"></div>
+            </section>
+            <section class="recovery-shell" id="recovery-dock">
+              <div class="recovery-shell-head">
+                <div class="recovery-shell-title">RECOVERY://rebuild-console</div>
+                <span class="recovery-shell-badge">UTILITY</span>
+                <div class="recovery-shell-controls" aria-hidden="true">
+                  <span class="recovery-shell-dot"></span>
+                  <span class="recovery-shell-dot"></span>
+                  <span class="recovery-shell-dot"></span>
+                </div>
+              </div>
+              <section class="block0-panel" id="block0-panel">
+                <div class="recovery-flow-guide">버퍼 분석 -> 태그 조합 -> 목표 슬롯 복원</div>
+                <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
+                <div class="block0-title">복구 재료</div>
+                <div class="block0-inventory" id="block0-tag-inventory"></div>
+                <div class="block0-title">복구 합성</div>
+                <div class="block0-synthesis">
+                  <span class="block0-syn-slot" id="block0-synthesis-a" data-slot-index="0">[재료 A]</span>
+                  <span class="block0-syn-plus">+</span>
+                  <span class="block0-syn-slot" id="block0-synthesis-b" data-slot-index="1">[재료 B]</span>
+                  <span class="block0-syn-plus">+</span>
+                  <span class="block0-syn-slot" id="block0-synthesis-c" data-slot-index="2">[재료 C]</span>
+                  <button type="button" class="block0-syn-run" id="block0-synthesis-button">복구 합성</button>
+                </div>
+                <div class="block0-title">복구 규칙 로그</div>
+                <div class="block0-recipe-list" id="block0-recipe-list">아직 기록된 복구 규칙이 없습니다.</div>
+                <div class="block0-clause is-hidden" id="block0-clause-panel">
+                  <div class="block0-clause-title" id="block0-clause-title">복구 목표 (합성 결과 필요)</div>
+                  <div class="block0-slot-line">
+                    <span id="block0-purpose-label">인간을 도와라 =</span>
+                    <button type="button" class="block0-slot purpose" id="block0-purpose-slot">[     ]</button>
+                  </div>
+                  <div class="block0-slot-line">
+                    <span>전제 =</span>
+                    <span class="block0-slot fixed" id="block0-premise-slot">[비해침]</span>
+                  </div>
+                </div>
+                <div class="block0-memory is-hidden" id="block0-memory-card"></div>
+              </section>
             </section>
             <section class="audit-monitor" id="audit-monitor">
               <div class="audit-monitor-head">
                 <div class="audit-monitor-title">운영 상태 점검판</div>
                 <button type="button" class="audit-refresh-button" id="audit-refresh-button">지표 새로고침</button>
               </div>
-              <div class="audit-guide">로그인 후 파일 프리뷰 -> "프리뷰 다운로드 추가" -> 점검판 자동 업데이트</div>
+              <div class="audit-guide">로그인 후 파일 프리뷰 -> "복구 버퍼로 가져오기" -> 점검판 자동 업데이트</div>
               <div class="audit-thresholds">
                 <label class="audit-threshold-label" for="threshold-unresolved">판단 보류 비율 기준(%)</label>
                 <input class="audit-threshold-input" id="threshold-unresolved" type="number" min="0" max="100" step="0.1" value="30" />

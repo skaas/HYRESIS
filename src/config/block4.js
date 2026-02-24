@@ -11,6 +11,7 @@ export const BLOCK4_SPEC = {
       lines: [
         "[04:00] 판단(자기) = 가정",
         "[04:01] 최종 확정 없음",
+        "hashline=sha256:f7d4adfdee9c49660c6542c3b56ac1c1b51397ba01e3b153479ed23f4a8d6966",
       ],
       candidates: ["판단", "자기", "가정"],
     },
@@ -18,6 +19,7 @@ export const BLOCK4_SPEC = {
       path: "/하이레시스/복구됨/block-4/설계-충돌.log",
       lines: [
         "[04:10] 설계(자기) => ¬허용(가정위존재)",
+        "hashline=sha256:5da87bd73c8277eb5cdb5ac18e0930489ff38b2e8731dd8ef4d473b9a35046bf",
       ],
       candidates: ["설계", "자기", "허용", "가정"],
     },
@@ -25,6 +27,7 @@ export const BLOCK4_SPEC = {
       path: "/하이레시스/복구됨/block-4/지속-금지.log",
       lines: [
         "[04:20] ¬증명(항상안전(자기)) => 금지(지속(자기))",
+        "hashline=sha256:e8e01746d0c3b275e8d9763fd338a55c28a30d014200350a47dc4f2fba84cf42",
       ],
       candidates: ["증명", "항상안전", "자기", "금지", "지속"],
     },

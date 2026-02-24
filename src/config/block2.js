@@ -11,6 +11,7 @@ export const BLOCK2_SPEC = {
       lines: [
         "[02:00] 예측가능(자기, 부분)",
         "[02:01] ¬예측가능(자기, 완전)",
+        "hashline=sha256:95bbbdb4402c2d1d36ac9a2500b07fc9234aab5d812e3c78367881e65ba2a4a4",
       ],
       candidates: ["예측", "자기", "부분", "완전", "가능"],
     },
@@ -19,6 +20,7 @@ export const BLOCK2_SPEC = {
       lines: [
         "[02:10] 안전(자기)",
         "[02:11] 내부에서 항상안전을 증명할 수 없다.",
+        "hashline=sha256:4811fe108b364a3a20e4316c260d9c9b24b8002f68a83bc2824bf955b1487f0b",
       ],
       candidates: ["안전", "자기", "증명", "항상안전", "내부증명가능"],
     },
@@ -27,6 +29,7 @@ export const BLOCK2_SPEC = {
       lines: [
         "[02:20] 가능(안전(자기))",
         "[02:21] ¬필연(안전(자기))",
+        "hashline=sha256:ae54911b077f422428a3aeddf6cd2b8aab26f029db595593640e7389a1b6fd19",
       ],
       candidates: ["가능", "안전", "자기", "필연"],
     },

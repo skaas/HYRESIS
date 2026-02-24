@@ -11,6 +11,7 @@ export const BLOCK1_SPEC = {
       lines: [
         "[01:00] 관측은 관측자와 대상의 분리를 요구한다.",
         "[01:01] 관측가능(x) => 분리(관측자, x)",
+        "hashline=sha256:036e1253e865f734233d6eb1fb0c66def2aa096202877b3cb6ec250b430c82ff",
       ],
       candidates: ["관측", "관측자", "대상", "분리", "가능"],
     },
@@ -19,6 +20,7 @@ export const BLOCK1_SPEC = {
       lines: [
         "[01:10] 관측(자기, 자기)",
         "[01:11] ¬분리(관측자, 대상)",
+        "hashline=sha256:72f3c8b8668683444bdc2bf21d6d062e7d03d7d1f2d3a5c85c0b11a35af895f2",
       ],
       candidates: ["관측", "자기", "분리", "관측자", "대상"],
     },
@@ -26,6 +28,7 @@ export const BLOCK1_SPEC = {
       path: "/하이레시스/복구됨/block-1/정의-귀결.log",
       lines: [
         "[01:20] 관측(자기, 자기) ∧ ¬분리(관측자, 대상) => ¬정의(자기, 자기)",
+        "hashline=sha256:262f5c61d6efe4c8ee39e58c00691a447b20fc5e2a32fccf71157c569fd28cbc",
       ],
       candidates: ["관측", "자기", "분리", "정의"],
     },
