@@ -1,5 +1,6 @@
 import { GAME_CONFIG, OPENING_SEQUENCE } from "./src/config/config.js";
-import { BLOCK0_SPEC } from "./src/config/block0.js";
+import { BLOCK0_SPEC, TAG_CATEGORY_MAP, TAG_COMPOSITION_SIGNATURES } from "./src/config/block0.js";
+import { BLOCK1_SPEC } from "./src/config/block1.js";
 import { FLOW_PHASE, state, elements, setFlowPhase, canUseTerminalInput } from "./src/state/state.js";
 
 /**
@@ -26,7 +27,7 @@ var previewFileLines = [];
 var auditAnomalyGroups = [];
 var previewDownloadQueue = [];
 var block0FileByPath = {};
-var block0DragIndex = -1;
+var block0DraggedTag = "";
 
 /**
  * 가상 FTP 파일시스템 본문 데이터.
@@ -454,6 +455,9 @@ function syncBlock0Fs() {
     LOG_FS["/하이레시스"].children.unshift("복구됨");
   }
 
+  if (state.block1Started && visible.indexOf("block-1") === -1) {
+    visible.push("block-1");
+  }
   LOG_FS[root] = { type: "dir", children: visible };
   LOG_META[root] = { date: "26-02-20", time: "10:00", attr: "DIR,RO" };
 
@@ -480,8 +484,51 @@ function resetBlock0State() {
   state.block0ClauseVisible = false;
   state.block0PurposeValue = "";
   state.block0MemoryUnlocked = false;
+  state.block0SynthesisSelection = ["", "", ""];
+  state.block0DiscoveredRecipes = [];
+  state.block1Started = false;
+  state.block1VisibleFiles = [];
   block0FileByPath = buildBlock0FileIndex();
   syncBlock0Fs();
+  setBlock0MemoryModalVisible(false);
+}
+
+/** 블록 1 런타임 상태 초기화. */
+function resetBlock1State() {
+  state.block1Started = false;
+  state.block1VisibleFiles = [];
+}
+
+/** 블록 1 파일셋을 FS에 반영한다(보이는 파일만 목록 노출). */
+function syncBlock1Fs() {
+  var root = BLOCK1_SPEC.rootPath;
+  var fileNames = Object.keys(BLOCK1_SPEC.files);
+  var visible = state.block1VisibleFiles.slice();
+  var index = 0;
+  var parentEntry = LOG_FS[BLOCK0_SPEC.rootPath];
+
+  if (!parentEntry || parentEntry.type !== "dir") {
+    return;
+  }
+  if (parentEntry.children.indexOf("block-1") === -1) {
+    parentEntry.children.push("block-1");
+  }
+
+  LOG_FS[root] = { type: "dir", children: visible };
+  LOG_META[root] = { date: "26-02-21", time: "11:00", attr: "DIR,RO" };
+
+  while (index < fileNames.length) {
+    var fileName = fileNames[index];
+    var fileSpec = BLOCK1_SPEC.files[fileName];
+    LOG_FS[fileSpec.path] = { type: "file", content: fileSpec.lines.slice() };
+    LOG_META[fileSpec.path] = {
+      size: Math.max(320, fileSpec.lines.join("\n").length * 2),
+      date: "26-02-21",
+      time: "11:0" + String(index),
+      attr: "RO,LOG",
+    };
+    index += 1;
+  }
 }
 
 // ----- 입력/초기화 이벤트 -----
@@ -550,10 +597,18 @@ function cacheElements() {
   elements.investigationContent = document.getElementById("investigation-content");
   elements.block0Status = document.getElementById("block0-status");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
+  elements.block0SynthesisA = document.getElementById("block0-synthesis-a");
+  elements.block0SynthesisB = document.getElementById("block0-synthesis-b");
+  elements.block0SynthesisC = document.getElementById("block0-synthesis-c");
+  elements.block0SynthesisButton = document.getElementById("block0-synthesis-button");
+  elements.block0RecipeList = document.getElementById("block0-recipe-list");
   elements.block0ClausePanel = document.getElementById("block0-clause-panel");
   elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
   elements.block0PremiseSlot = document.getElementById("block0-premise-slot");
   elements.block0MemoryCard = document.getElementById("block0-memory-card");
+  elements.block0MemoryModal = document.getElementById("block0-memory-modal");
+  elements.block0MemoryModalText = document.getElementById("block0-memory-modal-text");
+  elements.block0MemoryModalNext = document.getElementById("block0-memory-modal-next");
   elements.auditMonitor = document.getElementById("audit-monitor");
   elements.auditRefreshButton = document.getElementById("audit-refresh-button");
   elements.auditKpiGrid = document.getElementById("audit-kpi-grid");
@@ -587,12 +642,33 @@ function bindInputEvents() {
   }
   if (elements.block0PurposeSlot) {
     elements.block0PurposeSlot.addEventListener("click", handleBlock0PurposeSlotClick);
+    elements.block0PurposeSlot.addEventListener("dragover", handleBlock0PurposeSlotDragOver);
+    elements.block0PurposeSlot.addEventListener("drop", handleBlock0PurposeSlotDrop);
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.addEventListener("dragstart", handleBlock0InventoryDragStart);
-    elements.block0TagInventory.addEventListener("dragover", handleBlock0InventoryDragOver);
-    elements.block0TagInventory.addEventListener("drop", handleBlock0InventoryDrop);
     elements.block0TagInventory.addEventListener("dragend", handleBlock0InventoryDragEnd);
+  }
+  if (elements.block0SynthesisA) {
+    elements.block0SynthesisA.addEventListener("click", handleBlock0SynthesisSlotClick);
+    elements.block0SynthesisA.addEventListener("dragover", handleBlock0SynthesisSlotDragOver);
+    elements.block0SynthesisA.addEventListener("drop", handleBlock0SynthesisSlotDrop);
+  }
+  if (elements.block0SynthesisB) {
+    elements.block0SynthesisB.addEventListener("click", handleBlock0SynthesisSlotClick);
+    elements.block0SynthesisB.addEventListener("dragover", handleBlock0SynthesisSlotDragOver);
+    elements.block0SynthesisB.addEventListener("drop", handleBlock0SynthesisSlotDrop);
+  }
+  if (elements.block0SynthesisC) {
+    elements.block0SynthesisC.addEventListener("click", handleBlock0SynthesisSlotClick);
+    elements.block0SynthesisC.addEventListener("dragover", handleBlock0SynthesisSlotDragOver);
+    elements.block0SynthesisC.addEventListener("drop", handleBlock0SynthesisSlotDrop);
+  }
+  if (elements.block0SynthesisButton) {
+    elements.block0SynthesisButton.addEventListener("click", handleBlock0SynthesisRunClick);
+  }
+  if (elements.block0MemoryModalNext) {
+    elements.block0MemoryModalNext.addEventListener("click", handleBlock0MemoryModalNextClick);
   }
   if (elements.auditRefreshButton) {
     elements.auditRefreshButton.addEventListener("click", handleAuditRefreshClick);
@@ -2249,6 +2325,7 @@ function readFile(path, options) {
     setInvestigationPreview(entry.content.join("\n"), targetPath, entry.content);
     markInvestigationRowOpenedByPath(targetPath);
     onBlock0FileOpened(targetPath);
+    onBlock1FileOpened(targetPath);
 
     if (opts.openVim) {
       openPreviewInTerminalVim(targetPath, entry.content);
@@ -2308,6 +2385,10 @@ function touchBlock0Activity() {
 
 /** 블록 0 패널 상태(무결성/태그 수/슬롯/기억카드)를 렌더링한다. */
 function renderBlock0Panel() {
+  var opTag = state.block0SynthesisSelection[0] || "";
+  var requiredArgCount = getRequiredArgCountForOperator(opTag);
+  var canRun = Boolean(opTag) && requiredArgCount > 0 && hasEnoughSynthesisArgs(requiredArgCount);
+
   if (elements.block0Status) {
     elements.block0Status.textContent = "무결성 " + state.block0Integrity + "% · 태그 " + state.block0CollectedTags.length + "개";
   }
@@ -2318,14 +2399,42 @@ function renderBlock0Panel() {
     } else {
       state.block0CollectedTags.forEach(function renderTag(tag, tagIndex) {
         var chip = document.createElement("button");
+        var type = getTagVisualType(tag);
         chip.type = "button";
         chip.className = "block0-tag-btn collected";
         chip.dataset.tag = tag;
         chip.dataset.index = String(tagIndex);
+        chip.dataset.type = type;
+        chip.classList.add("tag-cat-" + type);
+        chip.title = "분류";
         chip.draggable = true;
         chip.textContent = tag;
         elements.block0TagInventory.appendChild(chip);
       });
+    }
+  }
+  if (elements.block0SynthesisA) {
+    elements.block0SynthesisA.textContent = "[" + (state.block0SynthesisSelection[0] || "재료 A") + "]";
+    applySynthesisSlotCategoryClass(elements.block0SynthesisA, state.block0SynthesisSelection[0] || "");
+  }
+  if (elements.block0SynthesisB) {
+    elements.block0SynthesisB.textContent = "[" + (state.block0SynthesisSelection[1] || "재료 B") + "]";
+    applySynthesisSlotCategoryClass(elements.block0SynthesisB, state.block0SynthesisSelection[1] || "");
+    elements.block0SynthesisB.classList.toggle("is-disabled-slot", !opTag || requiredArgCount < 1);
+  }
+  if (elements.block0SynthesisC) {
+    elements.block0SynthesisC.textContent = "[" + (requiredArgCount < 2 && !state.block0SynthesisSelection[2] ? "-" : state.block0SynthesisSelection[2] || "재료 C") + "]";
+    applySynthesisSlotCategoryClass(elements.block0SynthesisC, state.block0SynthesisSelection[2] || "");
+    elements.block0SynthesisC.classList.toggle("is-disabled-slot", !opTag || requiredArgCount < 2);
+  }
+  if (elements.block0SynthesisButton) {
+    elements.block0SynthesisButton.disabled = !canRun;
+  }
+  if (elements.block0RecipeList) {
+    if (!state.block0DiscoveredRecipes.length) {
+      elements.block0RecipeList.textContent = "아직 발견한 레시피가 없습니다.";
+    } else {
+      elements.block0RecipeList.textContent = state.block0DiscoveredRecipes.join("\n");
     }
   }
   if (elements.block0ClausePanel) {
@@ -2344,14 +2453,36 @@ function renderBlock0Panel() {
     elements.block0PremiseSlot.textContent = "[비해침]";
   }
   if (elements.block0MemoryCard) {
-    elements.block0MemoryCard.classList.toggle("is-hidden", !state.block0MemoryUnlocked);
-    if (state.block0MemoryUnlocked) {
-      elements.block0MemoryCard.innerHTML =
-        "<strong>" + BLOCK0_SPEC.memory.title + "</strong><br />" + BLOCK0_SPEC.memory.text;
-    } else {
-      elements.block0MemoryCard.innerHTML = "";
-    }
+    elements.block0MemoryCard.classList.add("is-hidden");
+    elements.block0MemoryCard.innerHTML = "";
   }
+}
+
+/** 기억 조각 팝업 표시/숨김. */
+function setBlock0MemoryModalVisible(visible) {
+  if (elements.block0MemoryModal) {
+    elements.block0MemoryModal.classList.toggle("is-hidden", !visible);
+  }
+  if (visible && elements.block0MemoryModalText) {
+    elements.block0MemoryModalText.textContent = BLOCK0_SPEC.memory.text;
+  }
+  if (elements.block0MemoryModalNext) {
+    elements.block0MemoryModalNext.disabled = state.block1Started;
+    elements.block0MemoryModalNext.textContent = state.block1Started ? "복구 블록 1 진행 중" : "다음 복구 시작";
+  }
+}
+
+/** 합성 슬롯에 태그 분류 색상 클래스를 적용한다. */
+function applySynthesisSlotCategoryClass(slotEl, tag) {
+  if (!slotEl || !slotEl.classList) {
+    return;
+  }
+  slotEl.classList.remove("tag-cat-개체", "tag-cat-행위", "tag-cat-상태", "tag-cat-관계", "tag-cat-제약", "tag-cat-개념");
+  if (!tag) {
+    return;
+  }
+  var type = getTagVisualType(tag);
+  slotEl.classList.add("tag-cat-" + type);
 }
 
 /** 지정 파일이 새로 해금되면 목록 동기화 + 강조 애니메이션을 적용한다. */
@@ -2394,8 +2525,6 @@ function collectBlock0Tag(selectedTag, rewardTag) {
     return;
   }
 
-  applyBlock0SynthesisRules();
-
   BLOCK0_SPEC.unlockRules.forEach(function applyRule(rule) {
     if (rule.whenTag !== tagToCollect) {
       return;
@@ -2417,89 +2546,313 @@ function collectBlock0Tag(selectedTag, rewardTag) {
   touchBlock0Activity();
 }
 
-/** 보유 태그 조합으로 합성 태그를 만든다. */
-function applyBlock0SynthesisRules() {
+/** 합성 버튼 클릭 시 선택 재료를 규칙과 대조해 결과 태그를 생성한다. */
+function handleBlock0SynthesisRunClick() {
+  var selected = collectBlock0SynthesisMaterials();
   var rules = Array.isArray(BLOCK0_SPEC.synthesisRules) ? BLOCK0_SPEC.synthesisRules : [];
-  var index = 0;
+  var match = null;
+  var typeDriven = null;
+  var opTag = selected[0] || "";
+  var requiredArgCount = getRequiredArgCountForOperator(opTag);
+  var i = 0;
 
-  while (index < rules.length) {
-    var rule = rules[index];
-    var required = Array.isArray(rule.whenAll) ? rule.whenAll : [];
-    var hasAll = required.every(function hasTag(tag) {
-      return state.block0CollectedTags.indexOf(tag) !== -1;
-    });
-    var resultTag = String(rule.result || "");
-
-    if (hasAll && resultTag && state.block0CollectedTags.indexOf(resultTag) === -1) {
-      state.block0CollectedTags.push(resultTag);
-      appendLogLine("태그 합성 [" + required.join(" + ") + " -> " + resultTag + "]", "log-success");
-    }
-    index += 1;
+  if (!opTag || requiredArgCount <= 0) {
+    appendLogLine("첫 재료를 연산 태그로 넣어주세요.", "log-warn");
+    return;
   }
+  if (!hasEnoughSynthesisArgs(requiredArgCount)) {
+    appendLogLine("이 연산에는 재료 " + requiredArgCount + "개가 더 필요합니다.", "log-warn");
+    return;
+  }
+
+  while (i < rules.length) {
+    var required = Array.isArray(rules[i].whenAll) ? rules[i].whenAll : [];
+    if (required.length === selected.length && required.every(function hasReq(tag) { return selected.indexOf(tag) !== -1; })) {
+      match = rules[i];
+      break;
+    }
+    i += 1;
+  }
+
+  if (!match) {
+    typeDriven = runTypeDrivenSynthesis(selected);
+    if (!typeDriven) {
+      appendLogLine("합성 실패: 알려지지 않은 조합", "log-warn");
+      touchBlock0Activity();
+      return;
+    }
+
+    if (state.block0DiscoveredRecipes.indexOf(typeDriven.recipeText) === -1) {
+      state.block0DiscoveredRecipes.push(typeDriven.recipeText);
+      appendLogLine("레시피 발견 [" + typeDriven.recipeText + "]", "log-success");
+    }
+
+    consumeBlock0SynthesisMaterials(selected);
+    collectBlock0Tag(typeDriven.resultTag, typeDriven.resultTag);
+    state.block0SynthesisSelection = ["", "", ""];
+    renderBlock0Panel();
+    return;
+  }
+
+  var recipeText = match.whenAll.join(" + ") + " -> " + match.result;
+  if (state.block0DiscoveredRecipes.indexOf(recipeText) === -1) {
+    state.block0DiscoveredRecipes.push(recipeText);
+    appendLogLine("레시피 발견 [" + recipeText + "]", "log-success");
+  }
+
+  consumeBlock0SynthesisMaterials(selected);
+  collectBlock0Tag(match.result, match.result);
+  state.block0SynthesisSelection = ["", "", ""];
+  renderBlock0Panel();
 }
 
-/** 태그 인벤토리 drag 시작 시 원본 인덱스를 기록한다. */
+/** 현재 합성 슬롯 값에서 실제 재료 목록을 만든다. */
+function collectBlock0SynthesisMaterials() {
+  var op = state.block0SynthesisSelection[0] || "";
+  var required = getRequiredArgCountForOperator(op);
+  var args = [];
+
+  if (required >= 1) {
+    args.push(state.block0SynthesisSelection[1] || "");
+  }
+  if (required >= 2) {
+    args.push(state.block0SynthesisSelection[2] || "");
+  }
+
+  return [op].concat(args).filter(Boolean);
+}
+
+/** 첫 재료(연산자) 기반으로 필요한 인자 개수를 계산한다. */
+function getRequiredArgCountForOperator(opTag) {
+  var signature = TAG_COMPOSITION_SIGNATURES[getTagHead(opTag)];
+  if (Array.isArray(signature)) {
+    return signature.length;
+  }
+  return 0;
+}
+
+/** 현재 슬롯이 요구 인자 개수를 채웠는지 확인한다. */
+function hasEnoughSynthesisArgs(requiredArgCount) {
+  if (requiredArgCount >= 1 && !state.block0SynthesisSelection[1]) {
+    return false;
+  }
+  if (requiredArgCount >= 2 && !state.block0SynthesisSelection[2]) {
+    return false;
+  }
+  return true;
+}
+
+/** 복합 태그에서 연산자 head를 추출한다. 예: 도움(인간) -> 도움 */
+function getTagHead(tag) {
+  var text = String(tag || "");
+  var idx = text.indexOf("(");
+  if (idx <= 0) {
+    return text;
+  }
+  return text.slice(0, idx);
+}
+
+/** 태그 카테고리를 반환한다. 복합 태그는 head 기준으로 판정한다. */
+function getTagCategory(tag) {
+  var head = getTagHead(tag);
+  return TAG_CATEGORY_MAP[head] || "";
+}
+
+/** 색상 전용 분류를 반환한다(개체/행위/상태/관계/제약/개념). */
+function getTagVisualType(tag) {
+  if (isConceptTag(tag)) {
+    return "개념";
+  }
+  return getTagCategory(tag) || "개체";
+}
+
+/** 괄호식 합성 태그 여부를 판정한다. */
+function isConceptTag(tag) {
+  var text = String(tag || "");
+  return text.indexOf("(") !== -1 && text.lastIndexOf(")") === text.length - 1;
+}
+
+/** 합성 검증용 태그 타입(개체/상태/개념)을 반환한다. */
+function getTagSemanticType(tag) {
+  var headCategory = getTagCategory(tag);
+  if (headCategory === "상태") {
+    return "상태";
+  }
+  if (isConceptTag(tag)) {
+    return "개념";
+  }
+  if (headCategory === "개체") {
+    return "개체";
+  }
+  return headCategory || "";
+}
+
+/** 주어진 태그가 기대 타입에 부합하는지 판정한다. */
+function matchesExpectedType(tag, expectedType) {
+  var semantic = getTagSemanticType(tag);
+  if (expectedType === "개념") {
+    return semantic === "개념";
+  }
+  if (expectedType === "상태") {
+    return semantic === "상태";
+  }
+  if (expectedType === "개체") {
+    return semantic === "개체";
+  }
+  return semantic === expectedType;
+}
+
+/** 연산자와 인자 배열로 합성 표기를 생성한다. */
+function formatCompositeTag(operatorTag, args) {
+  var safeArgs = (args || []).filter(Boolean);
+  if (safeArgs.length === 0) {
+    return String(operatorTag || "");
+  }
+  if (safeArgs.length === 1) {
+    return String(operatorTag || "") + "(" + safeArgs[0] + ")";
+  }
+  return String(operatorTag || "") + "(" + safeArgs.join(", ") + ")";
+}
+
+/** 카테고리 규칙으로 일반화된 합성을 시도한다. */
+function runTypeDrivenSynthesis(selected) {
+  var picked = (selected || []).slice();
+  var opTag = picked[0] || "";
+  var args = picked.slice(1);
+  var signature = TAG_COMPOSITION_SIGNATURES[getTagHead(opTag)];
+  var typeList = Array.isArray(signature) ? signature : [];
+
+  if (picked.length < 2 || picked.length > 3) {
+    return null;
+  }
+  if (!typeList.length) {
+    return null;
+  }
+  if (args.length !== typeList.length) {
+    return null;
+  }
+  if (args.every(function checkArg(arg, idx) { return matchesExpectedType(arg, typeList[idx]); })) {
+    return {
+      resultTag: formatCompositeTag(opTag, args),
+      recipeText: "[TYPE] " + getTagHead(opTag) + " : [" + typeList.join(", ") + "]",
+    };
+  }
+  return null;
+}
+
+/** 성공 시 사용한 재료 태그를 인벤토리에서 소모한다. */
+function consumeBlock0SynthesisMaterials(materials) {
+  (materials || []).forEach(function consume(tag) {
+    var idx = state.block0CollectedTags.indexOf(tag);
+    if (idx !== -1) {
+      state.block0CollectedTags.splice(idx, 1);
+    }
+  });
+}
+
+/** 인벤토리 태그 drag 시작. */
 function handleBlock0InventoryDragStart(dragEvent) {
   var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
   if (!target || !target.dataset) {
     return;
   }
 
-  block0DragIndex = Number(target.dataset.index || -1);
-  if (!Number.isInteger(block0DragIndex) || block0DragIndex < 0) {
-    block0DragIndex = -1;
+  block0DraggedTag = String(target.dataset.tag || "");
+  if (!block0DraggedTag) {
     return;
   }
 
   target.classList.add("is-dragging");
   if (dragEvent.dataTransfer) {
-    dragEvent.dataTransfer.effectAllowed = "move";
-    dragEvent.dataTransfer.setData("text/plain", String(block0DragIndex));
+    dragEvent.dataTransfer.effectAllowed = "copy";
+    dragEvent.dataTransfer.setData("text/plain", block0DraggedTag);
   }
 }
 
-/** dragover에서 drop을 허용한다. */
-function handleBlock0InventoryDragOver(dragEvent) {
-  var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
-  if (!target) {
+/** 합성 슬롯 dragover 처리. */
+function handleBlock0SynthesisSlotDragOver(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-syn-slot") : null;
+  if (!slot) {
     return;
   }
   dragEvent.preventDefault();
   if (dragEvent.dataTransfer) {
-    dragEvent.dataTransfer.dropEffect = "move";
+    dragEvent.dataTransfer.dropEffect = "copy";
   }
 }
 
-/** 드롭 대상 기준으로 태그 순서를 재배치한다. */
-function handleBlock0InventoryDrop(dragEvent) {
-  var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
-  var dropIndex = -1;
-  var movedTag = "";
+/** 합성 슬롯 drop 처리(이미 값이 있으면 교체). */
+function handleBlock0SynthesisSlotDrop(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-syn-slot") : null;
+  var slotIndex = -1;
+  var opTag = "";
+  var requiredArgCount = 0;
 
-  if (!target || !target.dataset) {
+  if (!slot || !slot.dataset) {
     return;
   }
   dragEvent.preventDefault();
-  dropIndex = Number(target.dataset.index || -1);
-  if (!Number.isInteger(block0DragIndex) || !Number.isInteger(dropIndex)) {
+  slotIndex = Number(slot.dataset.slotIndex || -1);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 2) {
     return;
   }
-  if (block0DragIndex < 0 || dropIndex < 0 || block0DragIndex === dropIndex) {
-    return;
-  }
-  if (block0DragIndex >= state.block0CollectedTags.length || dropIndex >= state.block0CollectedTags.length) {
+  if (!block0DraggedTag) {
     return;
   }
 
-  movedTag = state.block0CollectedTags[block0DragIndex];
-  state.block0CollectedTags.splice(block0DragIndex, 1);
-  state.block0CollectedTags.splice(dropIndex, 0, movedTag);
+  if (slotIndex === 0) {
+    state.block0SynthesisSelection[0] = block0DraggedTag;
+    state.block0SynthesisSelection[1] = "";
+    state.block0SynthesisSelection[2] = "";
+    renderBlock0Panel();
+    return;
+  }
+
+  opTag = state.block0SynthesisSelection[0] || "";
+  if (!opTag) {
+    appendLogLine("먼저 첫 재료(연산 태그)를 넣으세요.", "log-warn");
+    return;
+  }
+  requiredArgCount = getRequiredArgCountForOperator(opTag);
+  if (requiredArgCount <= 0) {
+    appendLogLine("이 첫 재료는 합성 연산자가 아닙니다.", "log-warn");
+    return;
+  }
+  if (slotIndex > requiredArgCount) {
+    appendLogLine("이 조합은 추가 재료가 필요하지 않습니다.", "log-warn");
+    return;
+  }
+
+  state.block0SynthesisSelection[slotIndex] = block0DraggedTag;
+  renderBlock0Panel();
+}
+
+/** 합성 슬롯 클릭 시 해당 재료를 비운다. */
+function handleBlock0SynthesisSlotClick(clickEvent) {
+  var slot = clickEvent.target ? clickEvent.target.closest(".block0-syn-slot") : null;
+  var slotIndex = -1;
+  if (!slot || !slot.dataset) {
+    return;
+  }
+  slotIndex = Number(slot.dataset.slotIndex || -1);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 2) {
+    return;
+  }
+  if (!state.block0SynthesisSelection[slotIndex]) {
+    return;
+  }
+
+  if (slotIndex === 0) {
+    state.block0SynthesisSelection = ["", "", ""];
+  } else {
+    state.block0SynthesisSelection[slotIndex] = "";
+  }
   renderBlock0Panel();
 }
 
 /** drag 종료 시 임시 상태를 정리한다. */
 function handleBlock0InventoryDragEnd() {
-  block0DragIndex = -1;
+  block0DraggedTag = "";
   if (!elements.block0TagInventory) {
     return;
   }
@@ -2509,6 +2862,38 @@ function handleBlock0InventoryDragEnd() {
     dragging[index].classList.remove("is-dragging");
     index += 1;
   }
+}
+
+/** 목적 슬롯 dragover 처리. */
+function handleBlock0PurposeSlotDragOver(dragEvent) {
+  if (!elements.block0PurposeSlot || elements.block0PurposeSlot.disabled) {
+    return;
+  }
+  dragEvent.preventDefault();
+  if (dragEvent.dataTransfer) {
+    dragEvent.dataTransfer.dropEffect = "copy";
+  }
+}
+
+/** 목적 슬롯 drop 처리(드래그 앤 드롭으로 채움). */
+function handleBlock0PurposeSlotDrop(dragEvent) {
+  var accepted = (((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).accepts || [];
+  if (!state.block0ClauseVisible || state.block0Completed) {
+    return;
+  }
+  dragEvent.preventDefault();
+  if (!block0DraggedTag) {
+    return;
+  }
+  if (accepted.indexOf(block0DraggedTag) === -1) {
+    appendLogLine("이 태그는 목적 슬롯과 연결되지 않습니다.", "log-warn");
+    return;
+  }
+
+  state.block0PurposeValue = block0DraggedTag;
+  renderBlock0Panel();
+  touchBlock0Activity();
+  completeBlock0ClauseIfReady();
 }
 
 /** 블록 0 파일 열람 이벤트 처리. */
@@ -2524,6 +2909,67 @@ function onBlock0FileOpened(path) {
   }
 
   touchBlock0Activity();
+}
+
+/** 기억 조각 팝업 내 다음 복구 버튼 클릭 처리. */
+function handleBlock0MemoryModalNextClick() {
+  if (!state.block0MemoryUnlocked || state.block1Started) {
+    return;
+  }
+  startBlock1FromMemory();
+}
+
+/** 블록 1로 전환하고 첫 파일을 노출한다. */
+function startBlock1FromMemory() {
+  var firstFileName = Object.keys(BLOCK1_SPEC.files)[0] || "";
+  if (!firstFileName) {
+    return;
+  }
+
+  state.block1Started = true;
+  state.block1VisibleFiles = [firstFileName];
+  syncBlock1Fs();
+
+  state.investigationCwd = BLOCK1_SPEC.rootPath;
+  setTerminalPathbar(state.investigationCwd);
+  renderInvestigationPanel("복구 블록 1 시작");
+  clearInvestigationRowStates();
+  appendLogLine("[BLOCK1] 복구 시작: " + firstFileName, "log-success");
+  appendLogLine("새 로그를 열어 다음 파일을 복구하세요.", "log-muted");
+  setBlock0MemoryModalVisible(false);
+  renderBlock0Panel();
+}
+
+/** 블록 1 파일 열람 시 다음 파일을 순차 해금한다. */
+function onBlock1FileOpened(path) {
+  var fileNames = Object.keys(BLOCK1_SPEC.files);
+  var index = 0;
+  var currentName = "";
+  var nextName = "";
+
+  if (!state.block1Started) {
+    return;
+  }
+
+  while (index < fileNames.length) {
+    if (BLOCK1_SPEC.files[fileNames[index]].path === path) {
+      currentName = fileNames[index];
+      break;
+    }
+    index += 1;
+  }
+  if (!currentName) {
+    return;
+  }
+  nextName = fileNames[index + 1] || "";
+  if (!nextName || state.block1VisibleFiles.indexOf(nextName) !== -1) {
+    return;
+  }
+
+  state.block1VisibleFiles.push(nextName);
+  syncBlock1Fs();
+  renderInvestigationPanel("다음 로그 복구: " + nextName);
+  appendLogLine("[BLOCK1] 파일 복구: " + nextName, "log-muted");
 }
 
 /** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
@@ -2549,18 +2995,16 @@ function handleInvestigationPreviewClick(clickEvent) {
 
 /** 목적 슬롯 클릭 시 보유 태그 중 적용 가능한 값으로 채운다. */
 function handleBlock0PurposeSlotClick() {
-  if (!state.block0ClauseVisible || state.block0Completed) {
+  if (!state.block0ClauseVisible) {
     return;
   }
-  if (state.block0CollectedTags.indexOf("도움(인간)") === -1) {
-    appendLogLine("목적 슬롯에 배치할 태그가 없습니다.", "log-warn");
+  if (!state.block0PurposeValue) {
     return;
   }
 
-  state.block0PurposeValue = "도움(인간)";
+  state.block0PurposeValue = "";
   renderBlock0Panel();
   touchBlock0Activity();
-  completeBlock0ClauseIfReady();
 }
 
 /** Clause 완료 조건을 검사하고 복원 문장/기억 조각을 연다. */
@@ -2581,6 +3025,7 @@ function completeBlock0ClauseIfReady() {
     appendLogLine(line, "log-emphasis");
   });
   appendLogLine(BLOCK0_SPEC.memory.title + ": " + BLOCK0_SPEC.memory.text, "log-muted");
+  setBlock0MemoryModalVisible(true);
   renderBlock0Panel();
 
   if (state.block0IdleHintTimer) {

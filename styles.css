@@ -375,6 +375,42 @@ body {
   cursor: grabbing;
 }
 
+.block0-tag-btn.tag-cat-개체 {
+  border-color: #58a6ff;
+  color: #d6e9ff;
+  background: #0e2236;
+}
+
+.block0-tag-btn.tag-cat-행위 {
+  border-color: #57d89f;
+  color: #d3f7e7;
+  background: #0d2a20;
+}
+
+.block0-tag-btn.tag-cat-상태 {
+  border-color: #f0bf58;
+  color: #ffeec9;
+  background: #35290f;
+}
+
+.block0-tag-btn.tag-cat-관계 {
+  border-color: #b38cff;
+  color: #e9deff;
+  background: #25193a;
+}
+
+.block0-tag-btn.tag-cat-제약 {
+  border-color: #ff7f96;
+  color: #ffdbe2;
+  background: #3b1b22;
+}
+
+.block0-tag-btn.tag-cat-개념 {
+  border-color: #7ea0b3;
+  color: #d8e3ea;
+  background: #1d2a31;
+}
+
 .block0-tag-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -433,6 +469,94 @@ body {
 .block0-slot.filled {
   border-color: #4cab8a;
   background: #123127;
+}
+
+.block0-synthesis {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.block0-syn-slot {
+  border: 1px solid #3a5b69;
+  background: #0f1f28;
+  color: #cfe5f0;
+  font-size: 11px;
+  padding: 3px 7px;
+  min-width: 78px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.block0-syn-slot.is-disabled-slot {
+  opacity: 0.5;
+}
+
+.block0-syn-slot.tag-cat-개체 {
+  border-color: #58a6ff;
+  background: #102539;
+  color: #d6e9ff;
+}
+
+.block0-syn-slot.tag-cat-행위 {
+  border-color: #57d89f;
+  background: #0f2a20;
+  color: #d3f7e7;
+}
+
+.block0-syn-slot.tag-cat-상태 {
+  border-color: #f0bf58;
+  background: #372c12;
+  color: #ffeec9;
+}
+
+.block0-syn-slot.tag-cat-관계 {
+  border-color: #b38cff;
+  background: #271b3c;
+  color: #e9deff;
+}
+
+.block0-syn-slot.tag-cat-제약 {
+  border-color: #ff7f96;
+  background: #3d1c23;
+  color: #ffdbe2;
+}
+
+.block0-syn-slot.tag-cat-개념 {
+  border-color: #7ea0b3;
+  background: #1f2b31;
+  color: #d8e3ea;
+}
+
+.block0-syn-plus {
+  color: #96b9c7;
+  font-size: 12px;
+}
+
+.block0-syn-run {
+  border: 1px solid #456d7d;
+  background: #12303d;
+  color: #d5ebf5;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.block0-syn-run:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.block0-recipe-list {
+  border: 1px solid #2e4551;
+  background: #0c171d;
+  color: #bad2df;
+  font-size: 11px;
+  padding: 6px;
+  min-height: 30px;
+  line-height: 1.45;
+  white-space: pre-line;
 }
 
 .block0-memory {
@@ -515,6 +639,57 @@ body {
   justify-content: center;
   background: rgba(2, 5, 6, 0.28);
   backdrop-filter: blur(0.5px);
+}
+
+.memory-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(1, 4, 7, 0.78);
+  z-index: 42;
+}
+
+.memory-modal.is-hidden {
+  display: none;
+}
+
+.memory-modal-card {
+  width: min(520px, calc(100vw - 36px));
+  border: 1px solid #4a6b8a;
+  background: #0f1a27;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.memory-modal-title {
+  color: #d9e9ff;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.memory-modal-text {
+  color: #c8d9f0;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.memory-modal-next {
+  border: 1px solid #5e7ea0;
+  background: #1b2c3f;
+  color: #e2ecfc;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.memory-modal-next:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .auth-overlay.is-hidden {

@@ -39,6 +39,17 @@
               <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
               <div class="block0-title">태그 인벤토리</div>
               <div class="block0-inventory" id="block0-tag-inventory"></div>
+              <div class="block0-title">합성</div>
+              <div class="block0-synthesis">
+                <span class="block0-syn-slot" id="block0-synthesis-a" data-slot-index="0">[재료 A]</span>
+                <span class="block0-syn-plus">+</span>
+                <span class="block0-syn-slot" id="block0-synthesis-b" data-slot-index="1">[재료 B]</span>
+                <span class="block0-syn-plus">+</span>
+                <span class="block0-syn-slot" id="block0-synthesis-c" data-slot-index="2">[재료 C]</span>
+                <button type="button" class="block0-syn-run" id="block0-synthesis-button">합성</button>
+              </div>
+              <div class="block0-title">발견한 레시피</div>
+              <div class="block0-recipe-list" id="block0-recipe-list">아직 발견한 레시피가 없습니다.</div>
               <div class="block0-clause is-hidden" id="block0-clause-panel">
                 <div class="block0-clause-title">복구 대상: Clause ?</div>
                 <div class="block0-slot-line">
@@ -135,6 +146,14 @@
           <div class="auth-error" id="auth-error"></div>
           <button type="submit" class="auth-submit">Attach Session</button>
         </form>
+      </section>
+
+      <section class="memory-modal is-hidden" id="block0-memory-modal" aria-live="polite">
+        <div class="memory-modal-card">
+          <div class="memory-modal-title">기억 조각 발견</div>
+          <div class="memory-modal-text" id="block0-memory-modal-text"></div>
+          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">다음 복구 시작</button>
+        </div>
       </section>
     </div>
 
