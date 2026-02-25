@@ -81,6 +81,9 @@ function formatCompositeTag(operatorTag, args) {
 
 /** 첫 재료(연산자) 기반으로 필요한 인자 개수를 계산한다. */
 export function getRequiredArgCountForOperator(opTag, signatures) {
+  if (isConceptTag(opTag)) {
+    return 0;
+  }
   var signature = (signatures || {})[getTagHead(opTag)];
   if (Array.isArray(signature)) {
     return signature.length;
@@ -128,6 +131,9 @@ export function runTypeDrivenSynthesis(selected, signatures, categoryMap) {
   var picked = (selected || []).slice();
   var opTag = picked[0] || "";
   var args = picked.slice(1);
+  if (isConceptTag(opTag)) {
+    return null;
+  }
   var signature = (signatures || {})[getTagHead(opTag)];
   var typeList = Array.isArray(signature) ? signature : [];
 

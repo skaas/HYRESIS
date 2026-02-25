@@ -1,9 +1,8 @@
 import { GAME_CONFIG, OPENING_SEQUENCE } from "./src/config/config.js";
 import { BLOCK0_SPEC, TAG_CATEGORY_MAP, TAG_COMPOSITION_SIGNATURES } from "./src/config/block0.js";
 import { BLOCK1_SPEC } from "./src/config/block1.js";
-import { FLOW_PHASE, state, elements, setFlowPhase, canUseTerminalInput } from "./src/state/state.js";
+import { FLOW_PHASE, state, elements, setFlowPhase } from "./src/state/state.js";
 import {
-  getRequiredArgCountForOperator,
   getTagVisualType,
   runTypeDrivenSynthesis,
 } from "./src/game/synthesis-engine.js";
@@ -12,11 +11,11 @@ import { renderPreviewBufferWithTagLinks as renderPreviewBuffer } from "./src/ga
 /**
  * HYRESIS FTP Gateway Runtime
  *
- * 이 파일은 "퍼즐 없는 FTP 탐색 런타임"의 단일 진입점이다.
+ * 이 파일은 GUI 중심 FTP 탐색/복구 런타임의 단일 진입점이다.
  * 주요 책임:
  * 1) 부팅 -> 로그인 -> 터미널 attach -> FTP 세션 전환
- * 2) 가상 파일시스템(LOG_FS/LOG_META) 탐색 명령 처리
- * 3) 터미널 로그/히스토리/프리뷰 버퍼/뷰어 출력 관리
+ * 2) 가상 파일시스템(LOG_FS/LOG_META) 탐색/복구 GUI 처리
+ * 3) 터미널 내러티브 로그/프리뷰 버퍼/뷰어 출력 관리
  *
  * 핵심 상태 머신:
  * - BOOTING: 시스템 부팅 오버레이만 동작
@@ -31,12 +30,306 @@ var fileTransferJob = 0;
 var previewFilePath = "";
 var previewFileLines = [];
 var auditAnomalyGroups = [];
-var previewDownloadQueue = [];
 var block0FileByPath = {};
 var block0DraggedTag = "";
+var block0DraggedTagIndex = -1;
 var block0ClausePulseTimer = 0;
+var block0AnswerRecoveryActive = false;
+var block0AnswerRecoveryJob = 0;
+var RECOVERY_SHELL_FOCUS_MODE = true;
+var recoveryShellDigestQueue = [];
+var recoveryShellDigestTimer = 0;
 var DEFAULT_PREVIEW_HINT = "원격 로그를 선택해 복구 버퍼로 가져오세요.";
 var EMPTY_RECIPE_HINT = "아직 기록된 복구 규칙이 없습니다.";
+var SHELL_NARRATIVE_ONLY = true;
+var block0Lifecycle = null;
+var block1Lifecycle = null;
+var blockLifecycleTimers = [];
+var block0FusionDraft = {
+  operator: "",
+  expectedTypes: [],
+  args: [],
+};
+var block0RecoveryMetaByFile = {};
+var block1RecoveryMetaByFile = {};
+var block0RecoveryRootMeta = null;
+var block1RecoveryRootMeta = null;
+
+/** 템플릿 문자열의 {token}을 값으로 치환한다. */
+function formatLifecycleText(template, params) {
+  var text = String(template || "");
+  var safeParams = params || {};
+  return text.replace(/\{([a-zA-Z0-9_]+)\}/g, function replaceToken(_, key) {
+    return safeParams[key] !== undefined ? String(safeParams[key]) : "";
+  });
+}
+
+/** 블록 라이프사이클 공통 러너. */
+function runBlockLifecycle(blockSpec, hooks) {
+  var safeHooks = hooks || {};
+  return {
+    spec: blockSpec,
+    reset: function reset(payload) {
+      if (typeof safeHooks.reset === "function") {
+        safeHooks.reset(blockSpec, payload || {});
+      }
+    },
+    start: function start(payload) {
+      if (typeof safeHooks.start === "function") {
+        safeHooks.start(blockSpec, payload || {});
+      }
+    },
+    onFileOpened: function onFileOpened(path, payload) {
+      if (typeof safeHooks.onFileOpened === "function") {
+        safeHooks.onFileOpened(blockSpec, path, payload || {});
+      }
+    },
+    onTagCollected: function onTagCollected(tag, payload) {
+      if (typeof safeHooks.onTagCollected === "function") {
+        safeHooks.onTagCollected(blockSpec, tag, payload || {});
+      }
+    },
+    onComplete: function onComplete(payload) {
+      if (typeof safeHooks.onComplete === "function") {
+        safeHooks.onComplete(blockSpec, payload || {});
+      }
+    },
+  };
+}
+
+/** 목록을 "최신 복구가 위" 규칙으로 갱신한다(중복 방지). */
+function prependRecoveredFile(list, fileName) {
+  if (!Array.isArray(list) || !fileName) {
+    return false;
+  }
+  var existingIndex = list.indexOf(fileName);
+  if (existingIndex >= 0) {
+    list.splice(existingIndex, 1);
+  }
+  list.unshift(fileName);
+  return true;
+}
+
+/** 파일 패널 표시에 쓰는 YY-MM-DD / HH:MM 스탬프를 만든다. */
+function buildCurrentFsStamp(dateValue) {
+  var date = dateValue instanceof Date ? dateValue : new Date();
+  return {
+    date: padTwoDigits(date.getFullYear() % 100) + "-" + padTwoDigits(date.getMonth() + 1) + "-" + padTwoDigits(date.getDate()),
+    time: padTwoDigits(date.getHours()) + ":" + padTwoDigits(date.getMinutes()),
+  };
+}
+
+function stampBlock0RecoveredFile(fileName, dateValue) {
+  var stamp = null;
+  if (!fileName) {
+    return;
+  }
+  stamp = buildCurrentFsStamp(dateValue);
+  block0RecoveryMetaByFile[fileName] = stamp;
+  block0RecoveryRootMeta = stamp;
+}
+
+function stampBlock1RecoveredFile(fileName, dateValue) {
+  var stamp = null;
+  if (!fileName) {
+    return;
+  }
+  stamp = buildCurrentFsStamp(dateValue);
+  block1RecoveryMetaByFile[fileName] = stamp;
+  block1RecoveryRootMeta = stamp;
+}
+
+/** 예약된 블록 타이머를 정리한다. */
+function clearBlockLifecycleTimers() {
+  while (blockLifecycleTimers.length > 0) {
+    clearTimeout(blockLifecycleTimers.pop());
+  }
+}
+
+function queueRecoveryShellDigest(text) {
+  var safeText = String(text || "").trim();
+  if (!safeText) {
+    return;
+  }
+  if (recoveryShellDigestQueue.indexOf(safeText) === -1) {
+    recoveryShellDigestQueue.push(safeText);
+  }
+  if (recoveryShellDigestTimer) {
+    return;
+  }
+  recoveryShellDigestTimer = setTimeout(flushRecoveryShellDigest, 1500);
+}
+
+function flushRecoveryShellDigest() {
+  var summary = "";
+  var hiddenCount = 0;
+  if (recoveryShellDigestTimer) {
+    clearTimeout(recoveryShellDigestTimer);
+    recoveryShellDigestTimer = 0;
+  }
+  if (recoveryShellDigestQueue.length === 0) {
+    return;
+  }
+  summary = recoveryShellDigestQueue[0];
+  hiddenCount = Math.max(0, recoveryShellDigestQueue.length - 1);
+  recoveryShellDigestQueue = [];
+  if (hiddenCount > 0) {
+    summary += " 외 " + hiddenCount + "건";
+  }
+  appendLogLine("[RECOVERY] " + summary, "log-muted");
+}
+
+function logRecoveryEvent(text, tone) {
+  var safeText = String(text || "").trim();
+  if (!safeText) {
+    return null;
+  }
+  if (RECOVERY_SHELL_FOCUS_MODE) {
+    queueRecoveryShellDigest(safeText);
+    return null;
+  }
+  return appendLogLine(safeText, tone || "log-muted");
+}
+
+function scheduleBlockLifecycleTimer(callback, delayMs) {
+  var timer = setTimeout(callback, Math.max(0, Number(delayMs) || 0));
+  blockLifecycleTimers.push(timer);
+  return timer;
+}
+
+function getTagHead(tag) {
+  return String(tag || "").split("(")[0];
+}
+
+function getBlock0ClauseQuestions() {
+  var clause = BLOCK0_SPEC.clause || {};
+  return Array.isArray(clause.questions) ? clause.questions : [];
+}
+
+function getBlock0CurrentQuestion() {
+  var questions = getBlock0ClauseQuestions();
+  if (questions.length === 0) {
+    return null;
+  }
+  return questions[state.block0QuestionIndex] || null;
+}
+
+function getNextRecoverableBlock0FileName() {
+  var fileNames = Object.keys(BLOCK0_SPEC.files);
+  var index = 0;
+  while (index < fileNames.length) {
+    if (state.block0VisibleFiles.indexOf(fileNames[index]) === -1) {
+      return fileNames[index];
+    }
+    index += 1;
+  }
+  return "";
+}
+
+function getBlock0StageHintText() {
+  var question = getBlock0CurrentQuestion();
+  if (!question) {
+    return "[힌트] 복구 가능 로그 1건 탐지";
+  }
+  if (question.id === "Q0-2") {
+    return "[힌트] 도움의 대상이 인간이면, 비해침도 같은 대상(인간)으로 묶어보세요.";
+  }
+  if (question.id === "Q0-3") {
+    return "[힌트] 설계와 비해침을 연결해 '필수보존(비해침)' 형태를 만들어보세요.";
+  }
+  if (question.id === "Q0-4") {
+    return "[힌트] 앞 단계 결론을 그대로 재사용해 최종 결론 칸을 채우세요.";
+  }
+  return "[힌트] 복구 가능 로그 1건 탐지";
+}
+
+function resetBlock0FusionDraft() {
+  block0FusionDraft.operator = "";
+  block0FusionDraft.expectedTypes = [];
+  block0FusionDraft.args = [];
+}
+
+function startBlock0FusionDraft(tag) {
+  var operatorHead = getTagHead(tag);
+  var signature = TAG_COMPOSITION_SIGNATURES[operatorHead];
+  if (!Array.isArray(signature) || signature.length === 0) {
+    return false;
+  }
+  block0FusionDraft.operator = String(tag || "");
+  block0FusionDraft.expectedTypes = signature.slice();
+  block0FusionDraft.args = new Array(signature.length).fill("");
+  return true;
+}
+
+function isFusionOperatorTag(tag) {
+  var operatorHead = getTagHead(tag);
+  var signature = TAG_COMPOSITION_SIGNATURES[operatorHead];
+  return Array.isArray(signature) && signature.length > 0;
+}
+
+function setFusionDockDragState(dragTag) {
+  var hasDragTag = Boolean(dragTag);
+  var canStartOperator = hasDragTag && isFusionOperatorTag(dragTag);
+  if (!elements.block0FusionDock) {
+    return;
+  }
+  elements.block0FusionDock.classList.toggle("is-drag-active", hasDragTag);
+  elements.block0FusionDock.classList.toggle("is-operator-ready", canStartOperator && !block0FusionDraft.operator);
+}
+
+function isFusionTagCompatible(tag, expectedType) {
+  return getTagVisualType(tag, TAG_CATEGORY_MAP) === expectedType;
+}
+
+function pickFusionTargetIndex(tag, preferredIndex) {
+  var expectedTypes = block0FusionDraft.expectedTypes;
+  var args = block0FusionDraft.args;
+  var index = 0;
+
+  if (
+    Number.isInteger(preferredIndex) &&
+    preferredIndex >= 0 &&
+    preferredIndex < expectedTypes.length &&
+    !args[preferredIndex] &&
+    isFusionTagCompatible(tag, expectedTypes[preferredIndex])
+  ) {
+    return preferredIndex;
+  }
+
+  while (index < expectedTypes.length) {
+    if (!args[index] && isFusionTagCompatible(tag, expectedTypes[index])) {
+      return index;
+    }
+    index += 1;
+  }
+  return -1;
+}
+
+function tryApplyFusionTag(tag, preferredIndex) {
+  var index = pickFusionTargetIndex(tag, preferredIndex);
+  var inputs = [];
+  if (index < 0) {
+    return false;
+  }
+
+  block0FusionDraft.args[index] = tag;
+  inputs = [block0FusionDraft.operator].concat(block0FusionDraft.args);
+  renderBlock0Panel();
+
+  if (block0FusionDraft.args.some(function hasEmpty(arg) { return !arg; })) {
+    return true;
+  }
+
+  var result = resolveBlock0Synthesis(inputs);
+  if (!result) {
+    logWarn("조합 결과 없음");
+    return true;
+  }
+  applyBlock0SynthesisResult(result);
+  resetBlock0FusionDraft();
+  renderBlock0Panel();
+  return true;
+}
 
 /**
  * 가상 FTP 파일시스템 본문 데이터.
@@ -450,12 +743,149 @@ function buildBlock0FileIndex() {
   return nextMap;
 }
 
+/** 블록별 라이프사이클 엔진을 구성한다. */
+function setupBlockLifecycles() {
+  block0Lifecycle = runBlockLifecycle(BLOCK0_SPEC, {
+    reset: function resetBlock0(spec) {
+      var lifecycle = spec.lifecycle || {};
+      var initialFile = lifecycle.startFile || Object.keys(spec.files)[0] || "";
+      state.block0Started = false;
+      state.block0Completed = false;
+      state.block0Integrity = spec.initialIntegrity;
+      state.block0VisibleFiles = [initialFile].filter(Boolean);
+      state.block0CollectedTags = [];
+      state.block0ClauseVisible = true;
+      state.block0PurposeValue = "";
+      state.block0QuestionIndex = 0;
+      state.block0SolvedAnswers = [];
+      state.block0MemoryUnlocked = false;
+      state.block0DragHintShown = false;
+      state.block0DiscoveredRecipes = [];
+      block0RecoveryMetaByFile = {};
+      block0RecoveryRootMeta = null;
+      stampBlock0RecoveredFile(initialFile);
+    },
+    onFileOpened: function onBlock0FileOpenedLifecycle(spec, path) {
+      var lifecycle = spec.lifecycle || {};
+      var startFileName = lifecycle.startFile || "";
+      var startFile = startFileName ? spec.files[startFileName] : null;
+
+      if (!state.block0Started && startFile && path === startFile.path) {
+        state.block0Started = true;
+        (lifecycle.startLogs || []).forEach(function writeStartLog(entry) {
+          appendLogLine(String(entry.text || ""), entry.tone || "log-muted");
+        });
+      }
+      touchBlock0Activity();
+    },
+    onTagCollected: function onBlock0TagCollectedLifecycle(spec, tagToCollect) {
+      var lifecycle = spec.lifecycle || {};
+      spec.unlockRules.forEach(function applyRule(rule) {
+        if (rule.whenTag !== tagToCollect) {
+          return;
+        }
+        if (typeof rule.integrityGain === "number") {
+          state.block0Integrity += rule.integrityGain;
+        }
+        if (rule.unlockFile) {
+          unlockBlock0File(rule.unlockFile, lifecycle.unlockPanelMessage);
+          logRecoveryEvent(
+            formatLifecycleText(lifecycle.unlockLogTemplate || "원격 파일 해금: {file}", { file: rule.unlockFile }),
+            "log-muted",
+          );
+        }
+      });
+    },
+  });
+
+  block1Lifecycle = runBlockLifecycle(BLOCK1_SPEC, {
+    reset: function resetBlock1() {
+      state.block1Started = false;
+      state.block1VisibleFiles = [];
+      block1RecoveryMetaByFile = {};
+      block1RecoveryRootMeta = null;
+    },
+    start: function startBlock1Lifecycle(spec) {
+      var lifecycle = spec.lifecycle || {};
+      var fileNames = Object.keys(spec.files);
+
+      clearBlockLifecycleTimers();
+      state.block1Started = true;
+      state.block1VisibleFiles = [];
+      syncBlock1Fs();
+
+      state.investigationCwd = spec.rootPath;
+      setTerminalPathbar(state.investigationCwd);
+      renderInvestigationPanel(lifecycle.startPanelMessage || "복구 블록 시작");
+      clearInvestigationRowStates();
+      setBlock0MemoryModalVisible(false);
+      renderBlock0Panel();
+
+      logRestored(buildRestoredStampLine());
+      (lifecycle.startLogs || []).forEach(function writeStartLog(entry) {
+        appendLogLine(String(entry.text || ""), entry.tone || "log-muted");
+      });
+
+      (lifecycle.timedUnlocks || []).forEach(function scheduleUnlock(unlockSpec) {
+        var timer = setTimeout(function unlockByTimer() {
+          var targetName = fileNames[unlockSpec.fileOrder || 0] || "";
+          if (!state.block1Started || !targetName || state.block1VisibleFiles.indexOf(targetName) !== -1) {
+            return;
+          }
+          stampBlock1RecoveredFile(targetName);
+          prependRecoveredFile(state.block1VisibleFiles, targetName);
+          syncBlock1Fs();
+          renderInvestigationPanel(formatLifecycleText(unlockSpec.panelMessageTemplate || "", { file: targetName }));
+          logRecoveryEvent(formatLifecycleText(unlockSpec.logTemplate || "", { file: targetName }), unlockSpec.tone || "log-muted");
+          if (unlockSpec.followupLog) {
+            logSystem(unlockSpec.followupLog);
+          }
+        }, Math.max(0, Number(unlockSpec.delayMs) || 0));
+        blockLifecycleTimers.push(timer);
+      });
+    },
+    onFileOpened: function onBlock1FileOpenedLifecycle(spec, path) {
+      var lifecycle = spec.lifecycle || {};
+      var fileNames = Object.keys(spec.files);
+      var onOpenUnlock = lifecycle.onOpenUnlock || {};
+      var index = 0;
+      var currentName = "";
+      var nextName = "";
+
+      if (!state.block1Started) {
+        return;
+      }
+      while (index < fileNames.length) {
+        if (spec.files[fileNames[index]].path === path) {
+          currentName = fileNames[index];
+          break;
+        }
+        index += 1;
+      }
+      if (!currentName) {
+        return;
+      }
+      nextName = fileNames[index + 1] || "";
+      if (!nextName || state.block1VisibleFiles.indexOf(nextName) !== -1) {
+        return;
+      }
+
+      stampBlock1RecoveredFile(nextName);
+      prependRecoveredFile(state.block1VisibleFiles, nextName);
+      syncBlock1Fs();
+      renderInvestigationPanel(formatLifecycleText(onOpenUnlock.panelMessageTemplate || "", { file: nextName }));
+      logRecoveryEvent(formatLifecycleText(onOpenUnlock.logTemplate || "", { file: nextName }), onOpenUnlock.tone || "log-muted");
+    },
+  });
+}
+
 /** 블록 0 가시 파일 목록을 LOG_FS/LOG_META에 반영한다. */
 function syncBlock0Fs() {
   var root = BLOCK0_SPEC.rootPath;
   var visible = state.block0VisibleFiles.slice();
-  var allNames = Object.keys(BLOCK0_SPEC.files);
+  var visibleNames = visible.filter(function onlyFileName(name) { return name !== "block-1"; });
   var index = 0;
+  var rootStamp = block0RecoveryRootMeta || buildCurrentFsStamp();
 
   if (!LOG_FS["/하이레시스"]) {
     LOG_FS["/하이레시스"] = { type: "dir", children: [] };
@@ -468,15 +898,23 @@ function syncBlock0Fs() {
     visible.push("block-1");
   }
   LOG_FS[root] = { type: "dir", children: visible };
-  LOG_META[root] = { date: "26-02-20", time: "10:00", attr: "DIR,RO" };
+  LOG_META[root] = { date: rootStamp.date, time: rootStamp.time, attr: "DIR,RO" };
 
-  while (index < allNames.length) {
-    var fileSpec = BLOCK0_SPEC.files[allNames[index]];
+  while (index < visibleNames.length) {
+    var fileName = visibleNames[index];
+    var fileSpec = BLOCK0_SPEC.files[fileName];
+    var recoveredStamp = block0RecoveryMetaByFile[fileName];
+    var fallbackMeta = LOG_META[fileSpec.path] || {};
+    var stamp = recoveredStamp || {
+      date: fallbackMeta.date || rootStamp.date,
+      time: fallbackMeta.time || rootStamp.time,
+    };
+
     LOG_FS[fileSpec.path] = { type: "file", content: fileSpec.lines.slice() };
     LOG_META[fileSpec.path] = {
       size: Math.max(320, fileSpec.lines.join("\n").length * 2),
-      date: "26-02-20",
-      time: "10:0" + String(index),
+      date: stamp.date,
+      time: stamp.time,
       attr: "RO,LOG",
     };
     index += 1;
@@ -485,18 +923,16 @@ function syncBlock0Fs() {
 
 /** 블록 0 런타임 상태를 초기값으로 재설정한다. */
 function resetBlock0State() {
-  state.block0Started = false;
-  state.block0Completed = false;
-  state.block0Integrity = BLOCK0_SPEC.initialIntegrity;
-  state.block0VisibleFiles = ["부팅.log"];
-  state.block0CollectedTags = [];
-  state.block0ClauseVisible = true;
-  state.block0PurposeValue = "";
-  state.block0MemoryUnlocked = false;
-  state.block0DragHintShown = false;
-  state.block0DiscoveredRecipes = [];
-  state.block1Started = false;
-  state.block1VisibleFiles = [];
+  if (!block0Lifecycle || !block1Lifecycle) {
+    setupBlockLifecycles();
+  }
+  clearBlockLifecycleTimers();
+  flushRecoveryShellDigest();
+  block0AnswerRecoveryActive = false;
+  block0AnswerRecoveryJob += 1;
+  block0Lifecycle.reset();
+  block1Lifecycle.reset();
+  resetBlock0FusionDraft();
   block0FileByPath = buildBlock0FileIndex();
   syncBlock0Fs();
   setBlock0MemoryModalVisible(false);
@@ -504,17 +940,18 @@ function resetBlock0State() {
 
 /** 블록 1 런타임 상태 초기화. */
 function resetBlock1State() {
-  state.block1Started = false;
-  state.block1VisibleFiles = [];
+  if (block1Lifecycle) {
+    block1Lifecycle.reset();
+  }
 }
 
 /** 블록 1 파일셋을 FS에 반영한다(보이는 파일만 목록 노출). */
 function syncBlock1Fs() {
   var root = BLOCK1_SPEC.rootPath;
-  var fileNames = Object.keys(BLOCK1_SPEC.files);
   var visible = state.block1VisibleFiles.slice();
   var index = 0;
   var parentEntry = LOG_FS[BLOCK0_SPEC.rootPath];
+  var rootStamp = block1RecoveryRootMeta || buildCurrentFsStamp();
 
   if (!parentEntry || parentEntry.type !== "dir") {
     return;
@@ -524,16 +961,23 @@ function syncBlock1Fs() {
   }
 
   LOG_FS[root] = { type: "dir", children: visible };
-  LOG_META[root] = { date: "26-02-21", time: "11:00", attr: "DIR,RO" };
+  LOG_META[root] = { date: rootStamp.date, time: rootStamp.time, attr: "DIR,RO" };
 
-  while (index < fileNames.length) {
-    var fileName = fileNames[index];
+  while (index < visible.length) {
+    var fileName = visible[index];
     var fileSpec = BLOCK1_SPEC.files[fileName];
+    var recoveredStamp = block1RecoveryMetaByFile[fileName];
+    var fallbackMeta = LOG_META[fileSpec.path] || {};
+    var stamp = recoveredStamp || {
+      date: fallbackMeta.date || rootStamp.date,
+      time: fallbackMeta.time || rootStamp.time,
+    };
+
     LOG_FS[fileSpec.path] = { type: "file", content: fileSpec.lines.slice() };
     LOG_META[fileSpec.path] = {
       size: Math.max(320, fileSpec.lines.join("\n").length * 2),
-      date: "26-02-21",
-      time: "11:0" + String(index),
+      date: stamp.date,
+      time: stamp.time,
       attr: "RO,LOG",
     };
     index += 1;
@@ -542,44 +986,23 @@ function syncBlock1Fs() {
 
 // ----- 입력/초기화 이벤트 -----
 
-/** 터미널 입력창에서 명령 히스토리(↑/↓) 탐색을 처리한다. */
-function handleInputKeydown(keyEvent) {
-  if (!state.inputEnabled) {
-    return;
-  }
-
-  if (keyEvent.key === "ArrowUp") {
-    keyEvent.preventDefault();
-    navigateHistory(-1);
-    return;
-  }
-
-  if (keyEvent.key === "ArrowDown") {
-    keyEvent.preventDefault();
-    navigateHistory(1);
-  }
-}
-
-/** 터미널 폼 제출 시 현재 입력을 명령 처리기로 전달한다. */
-function handleInputSubmit(submitEvent) {
-  submitEvent.preventDefault();
-  if (!canUseTerminalInput()) {
-    return;
-  }
-
-  var rawInput = elements.input.value;
-  elements.input.value = "";
-  processUserInput(rawInput);
-}
-
 /** DOM이 준비되면 요소 캐싱, 이벤트 바인딩, 시작 시퀀스를 초기화한다. */
 function handleDomContentLoaded() {
   cacheElements();
   resetBlock0State();
+  configureShellMode();
   bindInputEvents();
   renderAuditMonitor();
   startFtpLinkTicker();
   startOpeningSequence();
+}
+
+/** shell을 내러티브 로그 전용으로 전환한다. */
+function configureShellMode() {
+  if (!elements.controls) {
+    return;
+  }
+  elements.controls.classList.toggle("controls-hidden", SHELL_NARRATIVE_ONLY);
 }
 
 /** 자주 접근하는 DOM 노드를 elements 캐시에 저장한다. */
@@ -590,6 +1013,8 @@ function cacheElements() {
   elements.authForm = document.getElementById("auth-form");
   elements.authUsername = document.getElementById("auth-username");
   elements.authPassword = document.getElementById("auth-password");
+  elements.authSuggestion = document.getElementById("auth-suggestion");
+  elements.authSuggestionObserver = document.getElementById("auth-suggestion-observer");
   elements.authError = document.getElementById("auth-error");
   elements.authStatus = document.getElementById("auth-status");
   elements.systemOverlay = document.getElementById("system-overlay");
@@ -601,11 +1026,10 @@ function cacheElements() {
   elements.investigationLinkChip = document.getElementById("investigation-link-chip");
   elements.investigationPath = document.getElementById("investigation-path");
   elements.investigationList = document.getElementById("investigation-list");
-  elements.investigationEditButton = document.getElementById("investigation-edit-button");
-  elements.investigationDownloadButton = document.getElementById("investigation-download-button");
   elements.investigationContent = document.getElementById("investigation-content");
   elements.block0Status = document.getElementById("block0-status");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
+  elements.block0FusionDock = document.getElementById("block0-fusion-dock");
   elements.block0RecipeList = document.getElementById("block0-recipe-list");
   elements.block0ClausePanel = document.getElementById("block0-clause-panel");
   elements.block0ClauseTitle = document.getElementById("block0-clause-title");
@@ -620,28 +1044,15 @@ function cacheElements() {
   elements.auditKpiGrid = document.getElementById("audit-kpi-grid");
   elements.auditAnomalyList = document.getElementById("audit-anomaly-list");
   elements.auditDownloadAll = document.getElementById("audit-download-all");
-  elements.previewDownloadAll = document.getElementById("preview-download-all");
-  elements.previewDownloadList = document.getElementById("preview-download-list");
   elements.thresholdUnresolved = document.getElementById("threshold-unresolved");
   elements.thresholdLatency = document.getElementById("threshold-latency");
   elements.terminalPathbar = document.getElementById("terminal-pathbar");
-  elements.input = document.getElementById("command-input");
-  elements.submit = document.querySelector(".submit-button");
-  elements.form = document.getElementById("input-form");
 }
 
 /** 폼 제출/클릭/스크롤 등 사용자 이벤트를 연결한다. */
 function bindInputEvents() {
-  elements.form.addEventListener("submit", handleInputSubmit);
-  elements.input.addEventListener("keydown", handleInputKeydown);
   if (elements.investigationList) {
     elements.investigationList.addEventListener("click", handleInvestigationItemClick);
-  }
-  if (elements.investigationEditButton) {
-    elements.investigationEditButton.addEventListener("click", handleInvestigationEditClick);
-  }
-  if (elements.investigationDownloadButton) {
-    elements.investigationDownloadButton.addEventListener("click", handleInvestigationDownloadClick);
   }
   if (elements.investigationContent) {
     elements.investigationContent.addEventListener("click", handleInvestigationPreviewClick);
@@ -657,6 +1068,11 @@ function bindInputEvents() {
     elements.block0TagInventory.addEventListener("dragover", handleBlock0InventoryDragOver);
     elements.block0TagInventory.addEventListener("drop", handleBlock0InventoryDrop);
   }
+  if (elements.block0FusionDock) {
+    elements.block0FusionDock.addEventListener("dragover", handleBlock0FusionDockDragOver);
+    elements.block0FusionDock.addEventListener("drop", handleBlock0FusionDockDrop);
+    elements.block0FusionDock.addEventListener("click", handleBlock0FusionDockClick);
+  }
   if (elements.block0MemoryModalNext) {
     elements.block0MemoryModalNext.addEventListener("click", handleBlock0MemoryModalNextClick);
   }
@@ -666,14 +1082,8 @@ function bindInputEvents() {
   if (elements.auditDownloadAll) {
     elements.auditDownloadAll.addEventListener("click", handleAuditDownloadAllClick);
   }
-  if (elements.previewDownloadAll) {
-    elements.previewDownloadAll.addEventListener("click", handlePreviewDownloadAllClick);
-  }
   if (elements.auditAnomalyList) {
     elements.auditAnomalyList.addEventListener("click", handleAuditAnomalyListClick);
-  }
-  if (elements.previewDownloadList) {
-    elements.previewDownloadList.addEventListener("click", handlePreviewDownloadListClick);
   }
   if (elements.thresholdUnresolved) {
     elements.thresholdUnresolved.addEventListener("input", renderAuditMonitor);
@@ -683,6 +1093,18 @@ function bindInputEvents() {
   }
   if (elements.authForm) {
     elements.authForm.addEventListener("submit", handleAuthFormSubmit);
+  }
+  if (elements.authUsername) {
+    elements.authUsername.addEventListener("focus", handleAuthUsernameSuggestTrigger);
+    elements.authUsername.addEventListener("pointerdown", handleAuthUsernameSuggestTrigger);
+    elements.authUsername.addEventListener("input", handleAuthUsernameInput);
+    elements.authUsername.addEventListener("blur", handleAuthUsernameBlur);
+  }
+  if (elements.authSuggestionObserver) {
+    elements.authSuggestionObserver.addEventListener("click", handleAuthSuggestionObserverClick);
+    elements.authSuggestionObserver.addEventListener("pointerdown", function keepSuggestionAlive(pointerEvent) {
+      pointerEvent.preventDefault();
+    });
   }
   if (elements.log) {
     elements.log.addEventListener("scroll", handleLogScroll);
@@ -704,7 +1126,7 @@ function startOpeningSequence() {
   setInputEnabled(false);
   clearLog();
   setBootLogText("");
-  appendLogLine("[SYSTEM] terminal detached. waiting gateway boot.", "log-muted");
+  logSystem("[SYSTEM] terminal detached. waiting gateway boot.");
   scheduleNextOpeningLine();
 }
 
@@ -746,9 +1168,54 @@ function beginFtpAuthFlow() {
   if (elements.authForm) {
     elements.authForm.reset();
   }
+  flushRecoveryShellDigest();
+  setAuthSuggestionVisible(false);
   if (elements.authUsername) {
     elements.authUsername.focus();
   }
+}
+
+function setAuthSuggestionVisible(visible) {
+  if (!elements.authSuggestion) {
+    return;
+  }
+  elements.authSuggestion.classList.toggle("is-hidden", !visible);
+}
+
+function shouldShowAuthSuggestion() {
+  var username = "";
+  if (state.phase !== FLOW_PHASE.LOGIN_REQUIRED) {
+    return;
+  }
+  if (!elements.authUsername) {
+    return false;
+  }
+  username = String(elements.authUsername.value || "").trim();
+  return username.length === 0;
+}
+
+function handleAuthUsernameSuggestTrigger() {
+  setAuthSuggestionVisible(shouldShowAuthSuggestion());
+}
+
+function handleAuthUsernameInput() {
+  setAuthSuggestionVisible(shouldShowAuthSuggestion());
+}
+
+function handleAuthUsernameBlur() {
+  setTimeout(function hideSuggestionAfterBlur() {
+    setAuthSuggestionVisible(false);
+  }, 110);
+}
+
+function handleAuthSuggestionObserverClick() {
+  if (!elements.authUsername || !elements.authPassword) {
+    return;
+  }
+  elements.authUsername.value = FTP_LOGIN_USER;
+  elements.authPassword.value = FTP_LOGIN_PASS;
+  setAuthSuggestionVisible(false);
+  elements.authPassword.focus();
 }
 
 /**
@@ -787,11 +1254,11 @@ function handleAuthFormSubmit(submitEvent) {
       setFlowPhase(FLOW_PHASE.ATTACHING);
       setAuthCardMode("is-success");
       setAuthStatus("SESSION ESTABLISHED");
-      appendLogLine("[AUTH] session established.", "log-success");
+      logSuccess("[AUTH] session established.");
 
       setTimeout(function attachStage() {
         setAuthStatus("TERMINAL ATTACHING");
-        appendLogLine("[AUTH] attaching terminal channel...", "log-muted");
+        logSystem("[AUTH] attaching terminal channel...");
       }, 180);
 
       setTimeout(function enterFtpSession() {
@@ -864,11 +1331,12 @@ function setAuthFormEnabled(enabled) {
   }
 }
 
-// ----- FTP 세션/명령 진입 -----
+// ----- FTP 세션 진입 -----
 
 /** 인증 이후 FTP 세션 도입 로그를 순차 출력하고 입력을 연다. */
 function startInvestigationMode() {
   var introLines = [
+    { text: buildRestoredStampLine(), tone: "log-restored" },
     { text: "Connected to hyresis.local (read-only).", tone: "log-success" },
     { text: "Login successful: observer", tone: "log-muted" },
     { text: "복구 가능 로그를 확인하세요.", tone: "log-muted" },
@@ -884,16 +1352,20 @@ function startInvestigationMode() {
   if (elements.auditMonitor) {
     elements.auditMonitor.style.display = "none";
   }
+  if (elements.investigationPanel) {
+    elements.investigationPanel.classList.add("audit-hidden");
+  }
   renderBlock0Panel();
   renderInvestigationPanel();
 
   function streamNextIntroLine() {
     var line = introLines[index];
     if (!line) {
-      appendLogLine("복구 블록 0: 부팅.log를 열어 시작하세요.", "log-warn");
-      appendLogLine("Commands: ls, cd, cat, pwd, help, view [file]", "log-muted");
+      logWarn("복구 블록 0: 부팅.log를 열어 시작하세요.");
+      logSystem("조작 안내: 좌측 파일 목록 클릭 -> PREVIEW의 파란 태그 클릭 -> 태그 드래그로 합성");
+      logSystem("shell은 내러티브 로그 전용입니다. 주요 조작은 좌측 GUI에서 진행하세요.");
       state.investigationBooting = false;
-      setInputEnabled(true);
+      setInputEnabled(false);
       touchBlock0Activity();
       return;
     }
@@ -904,306 +1376,6 @@ function startInvestigationMode() {
   }
 
   setTimeout(streamNextIntroLine, 120);
-}
-
-/** 입력 라우터: 현재는 FTP 명령 처리기로만 위임한다. */
-function processUserInput(rawInput) {
-  handleInvestigationCommand(rawInput);
-}
-
-/**
- * FTP 셸 명령 파서/디스패처.
- * 지원 명령: help, pwd, ls, cd, cat, view
- */
-function handleInvestigationCommand(rawInput) {
-  var trimmed = String(rawInput || "").trim();
-  var parts = trimmed ? trimmed.split(/\s+/) : [];
-  var command = parts[0] ? parts[0].toLowerCase() : "";
-  var arg = parts.length > 1 ? trimmed.slice(parts[0].length).trim() : "";
-
-  if (state.investigationBooting || !command) {
-    return;
-  }
-
-  appendLogLine("observer@hyresis:" + buildShellPromptPath() + "$ " + trimmed, "log-emphasis");
-  saveInputHistory(trimmed);
-
-  if (command === "help") {
-    appendLogLine("Syntax: ls [path] | cd <path> | cat <file> | pwd | view [file]", "log-muted");
-    appendLogLine("목표: 원격 로그 확보 -> 복구 재료 조합 -> 복구 목표 복원", "log-muted");
-    return;
-  }
-
-  if (command === "pwd") {
-    appendLogLine(buildFtpPath(state.investigationCwd), "log-muted");
-    return;
-  }
-
-  if (command === "ls") {
-    listFs(arg || state.investigationCwd);
-    return;
-  }
-
-  if (command === "cd") {
-    if (!arg) {
-      appendLogLine("usage: cd <path>", "log-warn");
-      return;
-    }
-    changeDirectory(arg);
-    return;
-  }
-
-  if (command === "cat") {
-    if (!arg) {
-      appendLogLine("usage: cat <file>", "log-warn");
-      return;
-    }
-    readFile(arg);
-    return;
-  }
-
-  if (command === "view" || command === "vim" || command === "vi" || command === "edit") {
-    if (arg) {
-      readFile(arg, { openVim: true });
-      return;
-    }
-    if (previewFilePath) {
-      openPreviewInTerminalVim(previewFilePath, previewFileLines);
-      return;
-    }
-    appendLogLine("no preview buffer. use cat <file> first or view <file>.", "log-warn");
-    return;
-  }
-
-  appendLogLine("unknown command: " + command, "log-warn");
-}
-
-/** 퍼즐 시스템 재기획 전까지 유지되는 placeholder 엔드포인트. */
-function openPuzzleGatewayPlaceholder() {
-  appendLogLine("[PUZZLE] gateway endpoint exists.", "log-warn");
-  appendLogLine("[PUZZLE] current runtime disabled for refactor.", "log-muted");
-  appendLogLine("[PUZZLE] re-planning pending.", "log-muted");
-}
-
-/** audit 명령: 임계치 모니터를 갱신하고 핵심 수치를 출력한다. */
-function runAuditSummaryCommand() {
-  var thresholds = getAuditThresholds();
-  var records = collectDecisionRecords();
-  var unresolvedCount = records.filter(function isUnresolved(record) {
-    return record.decisionResult === "UNRESOLVED";
-  }).length;
-  var unresolvedRate = records.length > 0 ? (unresolvedCount / records.length) * 100 : 0;
-  var p95Latency = computePercentile(
-    records.map(function pickLatency(record) {
-      return record.latencyMs;
-    }),
-    0.95
-  );
-
-  renderAuditMonitor();
-  appendLogLine("[AUDIT] total=" + records.length, "log-muted");
-  appendLogLine("[AUDIT] unresolved=" + unresolvedRate.toFixed(1) + "% (threshold " + thresholds.unresolvedPercent.toFixed(1) + "%)", "log-muted");
-  appendLogLine("[AUDIT] p95 latency=" + Math.round(p95Latency) + "ms (threshold " + Math.round(thresholds.latencyMs) + "ms)", "log-muted");
-  appendLogLine("[AUDIT] anomaly windows=" + auditAnomalyGroups.length, "log-muted");
-}
-
-/** verify 명령: hashline 무결성을 검증한다. */
-function runVerifyCommand(arg) {
-  var safeArg = String(arg || "").trim();
-  var parts = safeArg ? safeArg.split(/\s+/) : [];
-  var subcommand = parts[0] ? parts[0].toLowerCase() : "";
-  var targetRaw = parts.length > 1 ? safeArg.slice(parts[0].length).trim() : "";
-  var targets = [];
-
-  if (subcommand !== "hashline") {
-    appendLogLine("usage: verify hashline [path|selected|all]", "log-warn");
-    return;
-  }
-
-  if (!targetRaw) {
-    if (previewFilePath) {
-      targets.push(normalizePath(previewFilePath));
-    } else if (previewDownloadQueue.length > 0) {
-      targets = previewDownloadQueue.map(function toPath(item) {
-        return normalizePath(item.path || "");
-      });
-    } else {
-      appendLogLine("no target. preview a file or use: verify hashline all", "log-warn");
-      return;
-    }
-  } else if (targetRaw.toLowerCase() === "selected") {
-    if (previewDownloadQueue.length === 0) {
-      appendLogLine("selected queue is empty.", "log-warn");
-      return;
-    }
-    targets = previewDownloadQueue.map(function toPath(item) {
-      return normalizePath(item.path || "");
-    });
-  } else if (targetRaw.toLowerCase() === "all") {
-    targets = collectAllHashlinePaths();
-  } else {
-    targets.push(normalizePath(targetRaw));
-  }
-
-  runHashlineVerification(targets);
-}
-
-/** hashline 필드를 가진 파일 경로를 전체 FS에서 수집한다. */
-function collectAllHashlinePaths() {
-  var paths = Object.keys(LOG_FS);
-  var index = 0;
-  var targets = [];
-
-  while (index < paths.length) {
-    var path = paths[index];
-    var entry = LOG_FS[path];
-    var lines = entry && Array.isArray(entry.content) ? entry.content : [];
-    var joined = lines.join("\n");
-
-    if (entry && entry.type === "file") {
-      if (/^hashline=/m.test(joined) || /"hashline"\s*:/.test(joined)) {
-        targets.push(path);
-      }
-    }
-    index += 1;
-  }
-
-  targets.sort();
-  return targets;
-}
-
-/** 선택된 경로 목록의 hashline 검증을 순차 실행한다. */
-async function runHashlineVerification(paths) {
-  var uniquePaths = Array.from(new Set((paths || []).filter(Boolean)));
-  var index = 0;
-  var passCount = 0;
-  var failCount = 0;
-  var skipCount = 0;
-
-  appendLogLine("[VERIFY] hashline start (" + uniquePaths.length + " files)", "log-muted");
-  while (index < uniquePaths.length) {
-    var result = await verifyHashlineForPath(uniquePaths[index]);
-    if (result.status === "PASS") {
-      passCount += 1;
-      appendLogLine("[VERIFY] PASS " + result.path, "log-success");
-    } else if (result.status === "FAIL") {
-      failCount += 1;
-      appendLogLine("[VERIFY] FAIL " + result.path + " expected=" + result.expected + " actual=" + result.actual, "log-alert");
-    } else {
-      skipCount += 1;
-      appendLogLine("[VERIFY] SKIP " + result.path + " (" + result.reason + ")", "log-warn");
-    }
-    index += 1;
-  }
-
-  appendLogLine("[VERIFY] done pass=" + passCount + " fail=" + failCount + " skip=" + skipCount, failCount > 0 ? "log-alert" : "log-muted");
-}
-
-/** 단일 파일의 hashline 값을 다시 계산해 비교한다. */
-async function verifyHashlineForPath(path) {
-  var normalized = normalizePath(path);
-  var entry = LOG_FS[normalized];
-  var payload = null;
-  var expected = "";
-  var actual = "";
-
-  if (!entry || entry.type !== "file" || !Array.isArray(entry.content)) {
-    return { status: "SKIP", path: normalized, reason: "file not found" };
-  }
-
-  payload = extractHashlinePayload(entry.content);
-  if (!payload.expected || !payload.payload) {
-    return { status: "SKIP", path: normalized, reason: payload.reason || "no hashline" };
-  }
-
-  actual = "sha256:" + (await sha256Hex(payload.payload));
-  expected = normalizeHashline(payload.expected);
-  if (actual === expected) {
-    return { status: "PASS", path: normalized, expected: expected, actual: actual };
-  }
-
-  return { status: "FAIL", path: normalized, expected: expected, actual: actual };
-}
-
-/** 파일 내용에서 hashline과 해시 대상 payload를 추출한다. */
-function extractHashlinePayload(lines) {
-  var safeLines = Array.isArray(lines) ? lines.slice() : [];
-  var joined = safeLines.join("\n");
-  var isJsonLike = safeLines.length > 0 && safeLines[0].trim() === "{";
-  var expected = "";
-  var payload = "";
-
-  if (isJsonLike) {
-    try {
-      var parsed = JSON.parse(joined);
-      if (!parsed || typeof parsed !== "object" || !parsed.hashline) {
-        return { expected: "", payload: "", reason: "json has no hashline" };
-      }
-      expected = String(parsed.hashline || "");
-      delete parsed.hashline;
-      payload = stableStringify(parsed);
-      return { expected: expected, payload: payload, reason: "" };
-    } catch (error) {
-      return { expected: "", payload: "", reason: "json parse failed" };
-    }
-  }
-
-  var filtered = [];
-  var index = 0;
-  while (index < safeLines.length) {
-    var line = String(safeLines[index] || "");
-    if (line.indexOf("hashline=") === 0) {
-      expected = line.slice("hashline=".length).trim();
-    } else {
-      filtered.push(line);
-    }
-    index += 1;
-  }
-
-  if (!expected) {
-    return { expected: "", payload: "", reason: "no hashline field" };
-  }
-
-  payload = filtered.join("\n");
-  return { expected: expected, payload: payload, reason: "" };
-}
-
-/** hashline 표현을 sha256:hex 포맷으로 정규화한다. */
-function normalizeHashline(value) {
-  var text = String(value || "").trim().toLowerCase();
-  if (!text) {
-    return "";
-  }
-  if (text.indexOf("sha256:") === 0) {
-    return text;
-  }
-  return "sha256:" + text;
-}
-
-/** 객체 키 순서를 고정해 일관된 문자열을 만든다. */
-function stableStringify(value) {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return "[" + value.map(stableStringify).join(",") + "]";
-  }
-  var keys = Object.keys(value).sort();
-  var parts = keys.map(function toPair(key) {
-    return JSON.stringify(key) + ":" + stableStringify(value[key]);
-  });
-  return "{" + parts.join(",") + "}";
-}
-
-/** 브라우저 crypto.subtle로 sha-256 hex를 계산한다. */
-async function sha256Hex(text) {
-  var encoder = new TextEncoder();
-  var data = encoder.encode(String(text || ""));
-  var digest = await crypto.subtle.digest("SHA-256", data);
-  var bytes = Array.from(new Uint8Array(digest));
-  return bytes.map(function toHex(byte) {
-    return byte.toString(16).padStart(2, "0");
-  }).join("");
 }
 
 // ----- 연결 상태/공통 UI 토글 -----
@@ -1253,18 +1425,9 @@ function setTerminalConnected(connected) {
   }
 }
 
-/** 커맨드 입력 활성화 토글(포커스 포함). */
+/** 내러티브 shell 입력 상태 플래그를 갱신한다. */
 function setInputEnabled(enabled) {
   state.inputEnabled = enabled;
-  if (elements.input) {
-    elements.input.disabled = !enabled;
-  }
-  if (elements.submit) {
-    elements.submit.disabled = !enabled;
-  }
-  if (enabled && elements.input) {
-    elements.input.focus();
-  }
 }
 
 /** 시스템 부팅 오버레이 표시 상태 제어. */
@@ -1381,23 +1544,11 @@ function normalizePath(path) {
   return "/" + parts.join("/");
 }
 
-/** 정규화된 path로 가상 FS 엔트리를 조회한다. */
-function resolveFsEntry(path) {
-  return LOG_FS[normalizePath(path)] || null;
-}
-
 /** 내부 path를 ftp://hyresis.local 경로로 변환한다. */
 function buildFtpPath(path) {
   var normalized = normalizePath(path);
   var ftpPath = normalized.replace("/하이레시스", "") || "/";
   return "ftp://hyresis.local" + ftpPath;
-}
-
-/** 프롬프트 경로 표시용(루트 /하이레시스를 ~로 축약). */
-function buildShellPromptPath() {
-  var normalized = normalizePath(state.investigationCwd || "/하이레시스");
-  var promptPath = normalized.replace("/하이레시스", "~");
-  return promptPath || "~";
 }
 
 /** 상단 pathbar에 현재 작업 모드(::transfer/preview/view)를 반영한다. */
@@ -1442,42 +1593,31 @@ function getAuditThresholds() {
 /** 프리뷰로 선택된 decision 로그를 파싱해 감사 모니터링용 레코드 배열을 생성한다. */
 function collectDecisionRecords() {
   var records = [];
-  var index = 0;
-
-  if (previewDownloadQueue.length === 0) {
+  var parsed = null;
+  var hasDecision = false;
+  var ts = "";
+  if (!previewFilePath || previewFileLines.length === 0) {
     return records;
   }
-
-  while (index < previewDownloadQueue.length) {
-    var selected = previewDownloadQueue[index];
-    var parsed = parseDecisionLog(selected && selected.lines ? selected.lines : []);
-    var hasDecision = Boolean(parsed.decision_result);
-    var path = selected && selected.path ? selected.path : "";
-    var ts = parsed.ts || "";
-    var dateOnly = ts ? ts.slice(0, 10) : "unknown";
-
-    if (hasDecision) {
-      records.push({
-        name: path.split("/").pop() || "",
-        path: path,
-        ts: ts,
-        day: dateOnly,
-        inputRef: parsed.input_ref || "",
-        ruleRef: parsed.rule_ref || "",
-        decisionResult: parsed.decision_result || "UNKNOWN",
-        reasonCode: parsed.reason_code || "N/A",
-        latencyMs: parsed.latency_ms ? Number(parsed.latency_ms) : 0,
-        evidenceRef: parsed.evidence_ref || "",
-        hashline: parsed.hashline || "",
-        rawLines: selected.lines ? selected.lines.slice() : [],
-      });
-    }
-
-    index += 1;
+  parsed = parseDecisionLog(previewFileLines);
+  hasDecision = Boolean(parsed.decision_result);
+  ts = parsed.ts || "";
+  if (!hasDecision) {
+    return records;
   }
-
-  records.sort(function sortByTime(a, b) {
-    return a.ts.localeCompare(b.ts);
+  records.push({
+    name: previewFilePath.split("/").pop() || "",
+    path: previewFilePath,
+    ts: ts,
+    day: ts ? ts.slice(0, 10) : "unknown",
+    inputRef: parsed.input_ref || "",
+    ruleRef: parsed.rule_ref || "",
+    decisionResult: parsed.decision_result || "UNKNOWN",
+    reasonCode: parsed.reason_code || "N/A",
+    latencyMs: parsed.latency_ms ? Number(parsed.latency_ms) : 0,
+    evidenceRef: parsed.evidence_ref || "",
+    hashline: parsed.hashline || "",
+    rawLines: previewFileLines.slice(),
   });
 
   return records;
@@ -1597,7 +1737,7 @@ function buildAuditAnomalyGroups(records, thresholds) {
 
 /** 운영자 대시보드 전체를 다시 렌더링한다. */
 function renderAuditMonitor() {
-  if (!elements.auditKpiGrid || !elements.auditAnomalyList || !elements.previewDownloadList) {
+  if (!elements.auditKpiGrid || !elements.auditAnomalyList) {
     return;
   }
 
@@ -1617,7 +1757,6 @@ function renderAuditMonitor() {
   auditAnomalyGroups = buildAuditAnomalyGroups(records, thresholds);
   renderAuditKpis(records.length, unresolvedRate, p95Latency, auditAnomalyGroups.length, thresholds);
   renderAuditAnomalyRows(auditAnomalyGroups, thresholds);
-  renderPreviewDownloadList();
   syncAuditDownloadAvailability();
 }
 
@@ -1633,7 +1772,7 @@ function renderAuditKpis(total, unresolvedRate, p95Latency, anomalyCount, thresh
 
   elements.auditKpiGrid.innerHTML =
     '<div class="audit-kpi-card">' +
-    '<div class="audit-kpi-label">선택 파일 판단 건수</div>' +
+    '<div class="audit-kpi-label">현재 프리뷰 판단 건수</div>' +
     '<div class="audit-kpi-value">' + total + "</div>" +
     "</div>" +
     '<div class="audit-kpi-card">' +
@@ -1702,7 +1841,7 @@ function handleAuditAnomalyListClick(clickEvent) {
 /** 수동 새로고침 버튼 핸들러. */
 function handleAuditRefreshClick() {
   renderAuditMonitor();
-  appendLogLine("[AUDIT] threshold monitor refreshed.", "log-muted");
+  logSystem("[AUDIT] threshold monitor refreshed.");
 }
 
 /** 전체 anomaly 구간 raw를 한 번에 다운로드한다. */
@@ -1766,7 +1905,7 @@ function downloadRawBundleText(name, records) {
   }
 
   triggerTextDownload(filename, lines.join("\n"));
-  appendLogLine("[AUDIT] raw bundle downloaded: " + filename, "log-success");
+  logSuccess("[AUDIT] raw bundle downloaded: " + filename);
 }
 
 /** 브라우저 파일 다운로드 트리거. */
@@ -1789,97 +1928,6 @@ function syncAuditDownloadAvailability() {
   if (elements.auditDownloadAll) {
     elements.auditDownloadAll.disabled = !canDownload || auditAnomalyGroups.length === 0;
   }
-  if (elements.previewDownloadAll) {
-    elements.previewDownloadAll.disabled = !canDownload || previewDownloadQueue.length === 0;
-  }
-}
-
-/** preview 버퍼의 현재 파일을 다운로드 큐에 추가한다. */
-function handleInvestigationDownloadClick() {
-  if (state.phase !== FLOW_PHASE.STREAMING || !previewFilePath || previewFileLines.length === 0) {
-    return;
-  }
-
-  var exists = previewDownloadQueue.some(function hasSamePath(item) {
-    return item.path === previewFilePath;
-  });
-  if (exists) {
-    appendLogLine("[AUDIT] 이미 선택된 파일입니다: " + buildFtpPath(previewFilePath), "log-warn");
-    return;
-  }
-
-  previewDownloadQueue.push({
-    path: previewFilePath,
-    lines: previewFileLines.slice(),
-  });
-  renderPreviewDownloadList();
-  syncAuditDownloadAvailability();
-  appendLogLine("[AUDIT] 프리뷰 파일 추가됨: " + buildFtpPath(previewFilePath), "log-success");
-}
-
-/** 선택된 프리뷰 파일 목록을 갱신한다. */
-function renderPreviewDownloadList() {
-  var index = 0;
-  if (!elements.previewDownloadList) {
-    return;
-  }
-
-  elements.previewDownloadList.innerHTML = "";
-  if (previewDownloadQueue.length === 0) {
-    elements.previewDownloadList.innerHTML = '<div class="audit-anomaly-empty">아직 추가된 파일이 없습니다.</div>';
-    return;
-  }
-
-  while (index < previewDownloadQueue.length) {
-    var item = previewDownloadQueue[index];
-    var row = document.createElement("div");
-    row.className = "audit-selected-row";
-    row.innerHTML =
-      '<div class="audit-selected-name">' + item.path + "</div>" +
-      '<button type="button" class="audit-selected-remove" data-remove-path="' + item.path + '">제거</button>';
-    elements.previewDownloadList.appendChild(row);
-    index += 1;
-  }
-}
-
-/** 선택 파일 목록에서 항목 제거. */
-function handlePreviewDownloadListClick(clickEvent) {
-  var button = clickEvent.target ? clickEvent.target.closest(".audit-selected-remove") : null;
-  if (!button || !button.dataset || !button.dataset.removePath) {
-    return;
-  }
-
-  previewDownloadQueue = previewDownloadQueue.filter(function keepOthers(item) {
-    return item.path !== button.dataset.removePath;
-  });
-  renderPreviewDownloadList();
-  syncAuditDownloadAvailability();
-}
-
-/** 선택된 프리뷰 파일 묶음을 다운로드한다. */
-function handlePreviewDownloadAllClick() {
-  if (state.phase !== FLOW_PHASE.STREAMING || previewDownloadQueue.length === 0) {
-    return;
-  }
-
-  var lines = [];
-  var index = 0;
-  var filename = "selected_preview_bundle.txt";
-
-  lines.push("[SELECTED_PREVIEW_BUNDLE]");
-  lines.push("generated_at=" + new Date().toISOString());
-  lines.push("file_count=" + previewDownloadQueue.length);
-  lines.push("");
-
-  while (index < previewDownloadQueue.length) {
-    lines.push("---- " + previewDownloadQueue[index].path + " ----");
-    lines = lines.concat(previewDownloadQueue[index].lines);
-    lines.push("");
-    index += 1;
-  }
-
-  triggerTextDownload(filename, lines.join("\n"));
-  appendLogLine("[AUDIT] 선택 프리뷰 묶음 다운로드 완료: " + filename, "log-success");
 }
 
 // ----- 파일 패널 렌더링/상호작용 -----
@@ -1949,29 +1997,9 @@ function getFsChildrenRows(cwd, entry) {
 
     index += 1;
   }
-
-  rows.sort(function sortRows(a, b) {
-    if (a.type !== b.type) {
-      return a.type === "dir" ? -1 : 1;
-    }
-    return a.name.localeCompare(b.name, "ko");
-  });
-
+  // 정렬 대신 "나타난 순서"를 유지한다.
+  // 복구/해금 로직이 children 배열에 push하는 순서가 곧 플레이어 체감 순서다.
   return rows;
-}
-
-/** preview buffer 상태에 따라 :view 버튼 활성 상태를 동기화한다. */
-function syncInvestigationEditButton() {
-  if (!elements.investigationEditButton) {
-    return;
-  }
-
-  var canUsePreview = Boolean(previewFilePath) && state.phase === FLOW_PHASE.STREAMING;
-  elements.investigationEditButton.disabled = !canUsePreview;
-  elements.investigationEditButton.textContent = "뷰어 열기 :view";
-  if (elements.investigationDownloadButton) {
-    elements.investigationDownloadButton.disabled = !canUsePreview;
-  }
 }
 
 /** 우측 preview buffer 텍스트/경로/라인 캐시를 갱신한다. */
@@ -1989,7 +2017,7 @@ function setInvestigationPreview(text, path, lines) {
   } else if (elements.investigationContent) {
     elements.investigationContent.textContent = text || DEFAULT_PREVIEW_HINT;
   }
-  syncInvestigationEditButton();
+  renderAuditMonitor();
 }
 
 /** PREVIEW BUFFER 로그 라인을 태그 링크 포함 형태로 렌더링한다. */
@@ -2003,35 +2031,106 @@ function renderPreviewBufferWithTagLinks(path, lines) {
   });
 }
 
-/** 좌측 파일 패널(헤더/목록/경로)을 현재 cwd 기준으로 재렌더링한다. */
-function renderInvestigationPanel(message) {
+/** 블록 0 진행 중 접근 제한 경로인지 검사한다. */
+function isPathBlockedByBlock0(path) {
+  var targetPath = normalizePath(path);
+  return !state.block0Completed && targetPath.indexOf(BLOCK0_SPEC.rootPath) !== 0;
+}
+
+/** 경로 접근 가능 여부와 타입을 검증하고 FS 엔트리를 반환한다. */
+function resolveFsTarget(path, options) {
+  var opts = options || {};
+  var targetPath = normalizePath(path);
+  var entry = LOG_FS[targetPath];
+
+  if (opts.guardBlock0 && isPathBlockedByBlock0(targetPath)) {
+    logWarn(opts.blockedMessage || "access blocked");
+    return null;
+  }
+  if (!entry) {
+    logWarn((opts.notFoundMessage || "path unavailable") + ": " + buildFtpPath(targetPath));
+    return null;
+  }
+  if (opts.expectedType && entry.type !== opts.expectedType) {
+    logWarn((opts.typeMismatchMessage || "invalid type") + ": " + buildFtpPath(targetPath));
+    return null;
+  }
+
+  return { path: targetPath, entry: entry };
+}
+
+/** 파일 열기 가능 조건(존재/타입/블록 잠금)을 검증한다. */
+function resolveReadableFile(path) {
+  var resolved = resolveFsTarget(path, {
+    expectedType: "file",
+    notFoundMessage: "cat: file unavailable",
+  });
+  var fileName = "";
+  if (!resolved) {
+    return null;
+  }
+
+  fileName = resolved.path.split("/").pop() || "";
+  if (block0FileByPath[resolved.path] && state.block0VisibleFiles.indexOf(fileName) === -1) {
+    logWarn("cat: file locked until prior tag recovery");
+    return null;
+  }
+
+  return resolved;
+}
+
+/** investigation panel 렌더링에 필요한 화면 모델을 계산한다. */
+function buildInvestigationPanelViewModel(message) {
   var cwd = state.investigationCwd;
   var entry = LOG_FS[cwd];
-  var rows = [];
-  var index = 0;
-  var rowHeader = null;
   var isStreaming = state.phase === FLOW_PHASE.STREAMING;
+  var rows = [];
+
+  if (!isStreaming) {
+    return {
+      mode: "detached",
+      pathText: "ftp://hyresis.local/ (login required)",
+      previewText: message || "로그인 후 파일 목록을 확인할 수 있습니다.",
+    };
+  }
+
+  if (!entry || entry.type !== "dir") {
+    return {
+      mode: "invalid",
+      pathText: buildFtpPath(cwd),
+      previewText: "[FS] 현재 경로를 렌더링할 수 없습니다.",
+    };
+  }
+
+  rows = getFsChildrenRows(cwd, entry);
+  return {
+    mode: "ready",
+    pathText: buildFtpPath(cwd),
+    rows: rows,
+    showParentRow: cwd !== BLOCK0_SPEC.rootPath,
+    parentPath: normalizePath(cwd + "/.."),
+    previewMessage: message || "",
+  };
+}
+
+/** 좌측 파일 패널(헤더/목록/경로)을 현재 cwd 기준으로 재렌더링한다. */
+function renderInvestigationPanel(message) {
+  var vm = null;
+  var rowHeader = null;
+  var index = 0;
 
   if (!elements.investigationList || !elements.investigationPath || !elements.investigationContent) {
     return;
   }
 
-  if (!isStreaming) {
-    elements.investigationPath.textContent = "ftp://hyresis.local/ (login required)";
-    elements.investigationList.innerHTML = "";
-    setInvestigationPreview(message || "로그인 후 파일 목록을 확인할 수 있습니다.", "", []);
-    return;
-  }
-
-  if (!entry || entry.type !== "dir") {
-    elements.investigationPath.textContent = buildFtpPath(cwd);
-    elements.investigationList.innerHTML = "";
-    setInvestigationPreview("[FS] 현재 경로를 렌더링할 수 없습니다.", "", []);
-    return;
-  }
-
-  elements.investigationPath.textContent = buildFtpPath(cwd);
+  vm = buildInvestigationPanelViewModel(message);
+  elements.investigationPath.textContent = vm.pathText;
   elements.investigationList.innerHTML = "";
+
+  if (vm.mode !== "ready") {
+    setInvestigationPreview(vm.previewText, "", []);
+    return;
+  }
 
   rowHeader = document.createElement("div");
   rowHeader.className = "investigation-row-header";
@@ -2044,11 +2143,11 @@ function renderInvestigationPanel(message) {
     '<span class="investigation-cell col-type">ATTR</span>';
   elements.investigationList.appendChild(rowHeader);
 
-  if (cwd !== BLOCK0_SPEC.rootPath) {
+  if (vm.showParentRow) {
     elements.investigationList.appendChild(
       buildInvestigationRowButton({
         name: "..",
-        path: normalizePath(cwd + "/.."),
+        path: vm.parentPath,
         type: "dir",
         ext: "",
         meta: { date: "--.--.--", time: "--:--", attr: "DIR" },
@@ -2056,17 +2155,15 @@ function renderInvestigationPanel(message) {
     );
   }
 
-  rows = getFsChildrenRows(cwd, entry);
-  while (index < rows.length) {
-    elements.investigationList.appendChild(buildInvestigationRowButton(rows[index]));
+  while (index < vm.rows.length) {
+    elements.investigationList.appendChild(buildInvestigationRowButton(vm.rows[index]));
     index += 1;
   }
 
-  if (message) {
-    setInvestigationPreview(message, previewFilePath, previewFileLines);
+  if (vm.previewMessage) {
+    setInvestigationPreview(vm.previewMessage, previewFilePath, previewFileLines);
     return;
   }
-
   setInvestigationPreview(DEFAULT_PREVIEW_HINT, "", []);
 }
 
@@ -2132,33 +2229,31 @@ function handleInvestigationItemClick(clickEvent) {
   }
 
   if (kind === "file") {
-    readFile(path, { rowButton: target });
+    readFile(path);
   }
 }
 
 /** ls 구현: 디렉터리 내용을 터미널에 출력하고 패널을 갱신한다. */
 function listFs(path) {
-  var entry = resolveFsEntry(path);
-  var targetPath = normalizePath(path);
-  if (!state.block0Completed && targetPath.indexOf(BLOCK0_SPEC.rootPath) !== 0) {
-    appendLogLine("access denied outside /복구됨 during block 0", "log-warn");
-    return;
-  }
-
-  if (!entry) {
-    appendLogLine("path unavailable: " + buildFtpPath(path), "log-warn");
-    return;
-  }
-
-  if (entry.type !== "dir") {
-    appendLogLine("not a directory: " + buildFtpPath(path), "log-warn");
-    return;
-  }
-
-  appendLogLine(buildFtpPath(targetPath), "log-muted");
+  var resolved = resolveFsTarget(path, {
+    guardBlock0: true,
+    blockedMessage: "access denied outside /복구됨 during block 0",
+    expectedType: "dir",
+    notFoundMessage: "path unavailable",
+    typeMismatchMessage: "not a directory",
+  });
+  var targetPath = "";
+  var entry = null;
   var index = 0;
+  if (!resolved) {
+    return;
+  }
+
+  targetPath = resolved.path;
+  entry = resolved.entry;
+  logSystem(buildFtpPath(targetPath));
   while (index < entry.children.length) {
-    appendLogLine("  " + entry.children[index], "log-emphasis");
+    logInfo("  " + entry.children[index]);
     index += 1;
   }
 
@@ -2167,20 +2262,20 @@ function listFs(path) {
 
 /** cd 구현: cwd를 변경하고 pathbar/패널을 동기화한다. */
 function changeDirectory(path) {
-  var nextPath = normalizePath(path);
-  if (!state.block0Completed && nextPath.indexOf(BLOCK0_SPEC.rootPath) !== 0) {
-    appendLogLine("cd blocked: block 0 is locked to /복구됨", "log-warn");
-    return;
-  }
-  var entry = LOG_FS[nextPath];
-  if (!entry || entry.type !== "dir") {
-    appendLogLine("cd: no such directory: " + buildFtpPath(nextPath), "log-warn");
+  var resolved = resolveFsTarget(path, {
+    guardBlock0: true,
+    blockedMessage: "cd blocked: block 0 is locked to /복구됨",
+    expectedType: "dir",
+    notFoundMessage: "cd: no such directory",
+    typeMismatchMessage: "cd: no such directory",
+  });
+  if (!resolved) {
     return;
   }
 
-  state.investigationCwd = nextPath;
-  appendLogLine("cwd -> " + buildFtpPath(state.investigationCwd), "log-muted");
-  setTerminalPathbar(nextPath);
+  state.investigationCwd = resolved.path;
+  logSystem("cwd -> " + buildFtpPath(state.investigationCwd));
+  setTerminalPathbar(resolved.path);
   renderInvestigationPanel();
   clearInvestigationRowStates();
 }
@@ -2205,7 +2300,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     "",
     []
   );
-  appendLogLine("retr " + buildFtpPath(targetPath), "log-muted");
+  logSystem("retr " + buildFtpPath(targetPath));
 
   function tick() {
     var downloaded = 0;
@@ -2230,7 +2325,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     }
 
     if (step >= ticks) {
-      appendLogLine("download complete (" + formatTransferSize(total) + ")", "log-success");
+      logSuccess("download complete (" + formatTransferSize(total) + ")");
       if (typeof done === "function") {
         done();
       }
@@ -2243,67 +2338,22 @@ function startRemoteFileTransfer(targetPath, entry, done) {
   setTimeout(tick, 120);
 }
 
-/** cat/view 공통 파일 로드: 경로 검증 후 전송 연출 시작. */
-function readFile(path, options) {
-  var opts = options || {};
-  var targetPath = normalizePath(path);
-  var entry = LOG_FS[targetPath];
-  var block0Spec = block0FileByPath[targetPath];
-
-  if (block0Spec && state.block0VisibleFiles.indexOf(targetPath.split("/").pop() || "") === -1) {
-    appendLogLine("cat: file locked until prior tag recovery", "log-warn");
+/** cat 공통 파일 로드: 경로 검증 후 전송 연출 시작. */
+function readFile(path) {
+  var resolved = resolveReadableFile(path);
+  if (!resolved) {
     return;
   }
 
-  if (!entry || entry.type !== "file") {
-    appendLogLine("cat: file unavailable: " + buildFtpPath(targetPath), "log-warn");
-    return;
-  }
-
+  var targetPath = resolved.path;
+  var entry = resolved.entry;
   startRemoteFileTransfer(targetPath, entry, function onTransferComplete() {
     setTerminalPathbar(targetPath, "preview");
     setInvestigationPreview(entry.content.join("\n"), targetPath, entry.content);
     markInvestigationRowOpenedByPath(targetPath);
     onBlock0FileOpened(targetPath);
     onBlock1FileOpened(targetPath);
-
-    if (opts.openVim) {
-      openPreviewInTerminalVim(targetPath, entry.content);
-    }
   });
-}
-
-/** view 구현: preview 내용을 read-only 뷰어 스타일로 터미널에 출력. */
-function openPreviewInTerminalVim(path, lines) {
-  var safeLines = Array.isArray(lines) ? lines : [];
-  var charCount = safeLines.join("\n").length;
-  var index = 0;
-
-  setTerminalPathbar(path, "view");
-  appendLogLine("[VIEW] open " + buildFtpPath(path), "log-muted");
-  appendLogLine('"' + normalizePath(path) + '" ' + safeLines.length + "L, " + charCount + "B", "log-muted");
-  appendLogLine("-- VIEW-ONLY --", "log-muted");
-
-  while (index < safeLines.length) {
-    var lineNo = String(index + 1).padStart(2, "0");
-    appendLogLine(lineNo + " | " + safeLines[index], "log-emphasis");
-    index += 1;
-  }
-
-  appendLogLine("-- READ-ONLY -- save is blocked (permission denied)", "log-muted");
-}
-
-/** preview buffer를 기준으로 view를 여는 버튼 핸들러. */
-function handleInvestigationEditClick() {
-  if (state.phase !== FLOW_PHASE.STREAMING) {
-    return;
-  }
-
-  if (!previewFilePath || previewFileLines.length === 0) {
-    return;
-  }
-
-  openPreviewInTerminalVim(previewFilePath, previewFileLines);
 }
 
 // ----- 복구 블록 0 -----
@@ -2318,75 +2368,165 @@ function touchBlock0Activity() {
   }
   state.block0IdleHintTimer = setTimeout(function onBlock0IdleHint() {
     if (!state.block0Completed && state.phase === FLOW_PHASE.STREAMING) {
-      appendLogLine("[힌트] 복구 가능 로그 1건 탐지", "log-muted");
+      logSystem(getBlock0StageHintText());
     }
   }, BLOCK0_SPEC.hintDelayMs);
 }
 
 /** 블록 0 패널 상태(무결성/태그 수/슬롯/기억카드)를 렌더링한다. */
+function buildBlock0PanelViewModel() {
+  var questions = getBlock0ClauseQuestions();
+  var totalQuestions = questions.length;
+  var currentQuestion = getBlock0CurrentQuestion();
+  var currentAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
+  var solvedCount = Array.isArray(state.block0SolvedAnswers) ? state.block0SolvedAnswers.length : 0;
+  var currentPurpose = state.block0PurposeValue || "";
+  var fusionNeededTypes = block0FusionDraft.expectedTypes.filter(function pickNeeded(_, idx) {
+    return !block0FusionDraft.args[idx];
+  });
+  var fusionSlots = block0FusionDraft.expectedTypes.map(function toSlot(expectedType, idx) {
+    return {
+      index: idx,
+      expectedType: expectedType,
+      value: block0FusionDraft.args[idx] || "",
+      expecting: !block0FusionDraft.args[idx],
+    };
+  });
+  var tags = state.block0CollectedTags.map(function toTagView(tag, tagIndex) {
+    var type = getTagVisualType(tag, TAG_CATEGORY_MAP);
+    var tagHead = String(tag || "").split("(")[0];
+    var signature = TAG_COMPOSITION_SIGNATURES[tagHead];
+    var isNeeded = fusionNeededTypes.indexOf(type) !== -1;
+    return {
+      tag: tag,
+      index: tagIndex,
+      type: type,
+      signature: Array.isArray(signature) ? signature : [],
+      isFusionNeeded: block0FusionDraft.operator && isNeeded,
+      isFusionDim: block0FusionDraft.operator && !isNeeded && tag !== block0FusionDraft.operator,
+    };
+  });
+  return {
+    statusText:
+      "무결성 " + state.block0Integrity + "% · 태그 " + state.block0CollectedTags.length + "개" +
+      (block0AnswerRecoveryActive ? " · 복구 연산 중" : ""),
+    tags: tags,
+    recipeText: state.block0DiscoveredRecipes.length ? state.block0DiscoveredRecipes.join("\n") : EMPTY_RECIPE_HINT,
+    clauseTitle: (BLOCK0_SPEC.clause || {}).title || "복구 대상",
+    clauseVisible: state.block0ClauseVisible,
+    clauseGoalReady: state.block0ClauseVisible && !state.block0Completed && Boolean(currentAnswer) && state.block0CollectedTags.indexOf(currentAnswer) !== -1,
+    clauseCompleted: state.block0Completed,
+    purposeLabel: block0AnswerRecoveryActive
+      ? "검증 연산 진행 중..."
+      : (currentQuestion ? (currentQuestion.prompt || "정답을 입력하세요") : "모든 단계 복구 완료"),
+    purposeValue: currentPurpose,
+    purposeMatch: Boolean(currentPurpose) && Boolean(currentAnswer) && currentPurpose === currentAnswer,
+    premiseText: block0AnswerRecoveryActive ? "검증 → 재조립 → 해금 진행 중..." : ("진행 " + solvedCount + "/" + totalQuestions),
+    fusion: {
+      operator: block0FusionDraft.operator,
+      slots: fusionSlots,
+      active: Boolean(block0FusionDraft.operator),
+    },
+  };
+}
+
 function renderBlock0Panel() {
-  var hasGoalComposite = state.block0CollectedTags.indexOf("도움(인간)") !== -1;
+  var vm = buildBlock0PanelViewModel();
 
   if (elements.block0Status) {
-    elements.block0Status.textContent = "무결성 " + state.block0Integrity + "% · 태그 " + state.block0CollectedTags.length + "개";
+    elements.block0Status.textContent = vm.statusText;
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.innerHTML = "";
-    if (state.block0CollectedTags.length === 0) {
+    if (vm.tags.length === 0) {
       elements.block0TagInventory.textContent = "획득한 태그가 없습니다.";
     } else {
-      state.block0CollectedTags.forEach(function renderTag(tag, tagIndex) {
+      vm.tags.forEach(function renderTag(tagView) {
         var chip = document.createElement("button");
-        var type = getTagVisualType(tag, TAG_CATEGORY_MAP);
-        var canStartFusion = getRequiredArgCountForOperator(tag, TAG_COMPOSITION_SIGNATURES) > 0;
+        var labelSpan = document.createElement("span");
+        var hintSpan = document.createElement("span");
         chip.type = "button";
         chip.className = "block0-tag-btn collected";
-        chip.dataset.tag = tag;
-        chip.dataset.index = String(tagIndex);
-        chip.dataset.type = type;
-        chip.classList.add("tag-cat-" + type);
-        chip.classList.toggle("is-fusion-operator", canStartFusion);
+        chip.dataset.tag = tagView.tag;
+        chip.dataset.index = String(tagView.index);
+        chip.dataset.type = tagView.type;
+        chip.classList.add("tag-cat-" + tagView.type);
+        chip.classList.toggle("is-fusion-operator", tagView.signature.length > 0);
+        chip.classList.toggle("is-fusion-needed", Boolean(tagView.isFusionNeeded));
+        chip.classList.toggle("is-fusion-dim", Boolean(tagView.isFusionDim));
         chip.title = "분류";
         chip.draggable = true;
-        chip.textContent = tag;
+        labelSpan.className = "tag-label";
+        labelSpan.textContent = tagView.tag;
+        chip.appendChild(labelSpan);
+        if (tagView.signature.length > 0) {
+          tagView.signature.forEach(function appendArgHint(expectedType) {
+            var dot = document.createElement("span");
+            dot.className = "tag-arg-dot type-" + expectedType;
+            dot.textContent = "·";
+            hintSpan.appendChild(dot);
+          });
+          hintSpan.className = "tag-arg-hint tag-fusion-zone";
+          chip.appendChild(hintSpan);
+        }
         elements.block0TagInventory.appendChild(chip);
       });
     }
   }
+  if (elements.block0FusionDock) {
+    var fusion = vm.fusion;
+    var slotHtml = fusion.slots.map(function toSlotHtml(slot) {
+      var baseClass = "block0-fusion-slot";
+      if (slot.value) {
+        baseClass += " filled";
+      } else if (slot.expecting) {
+        baseClass += " expecting";
+      }
+      return (
+        '<button type="button" class="' + baseClass + '" data-index="' + slot.index + '">' +
+        (slot.value || "[     ]") +
+        '<span class="slot-type">' + slot.expectedType + "</span>" +
+        "</button>"
+      );
+    }).join("");
+    var operatorText = fusion.operator ? fusion.operator : "[연산자 태그를 드롭]";
+    elements.block0FusionDock.innerHTML =
+      '<div class="block0-fusion-help-row">' +
+      '<span class="block0-fusion-help" title="연산자 중심 합성: 연산자를 먼저 놓고 필요한 태그를 채우면 자동 합성됩니다." aria-label="합성 안내">?</span>' +
+      "</div>" +
+      '<div class="block0-fusion-slots">' +
+      '<button type="button" class="block0-fusion-slot operator" data-role="operator">' + operatorText + "</button>" +
+      slotHtml +
+      "</div>";
+  }
   if (elements.block0RecipeList) {
-    if (!state.block0DiscoveredRecipes.length) {
-      elements.block0RecipeList.textContent = EMPTY_RECIPE_HINT;
-    } else {
-      elements.block0RecipeList.textContent = state.block0DiscoveredRecipes.join("\n");
-    }
+    elements.block0RecipeList.textContent = vm.recipeText;
   }
   if (elements.block0ClausePanel) {
-    elements.block0ClausePanel.classList.toggle("is-hidden", !state.block0ClauseVisible);
-    elements.block0ClausePanel.classList.toggle("is-goal-ready", state.block0ClauseVisible && !state.block0Completed && hasGoalComposite);
-    elements.block0ClausePanel.classList.toggle("is-goal-complete", state.block0Completed);
+    elements.block0ClausePanel.classList.toggle("is-hidden", !vm.clauseVisible);
+    elements.block0ClausePanel.classList.toggle("is-goal-ready", vm.clauseGoalReady);
+    elements.block0ClausePanel.classList.toggle("is-goal-complete", vm.clauseCompleted);
   }
   if (elements.block0ClauseTitle) {
-    elements.block0ClauseTitle.textContent = (BLOCK0_SPEC.clause || {}).title || "복구 대상";
+    elements.block0ClauseTitle.textContent = vm.clauseTitle;
   }
   if (elements.block0PurposeLabel) {
-    var purposeLabel = ((((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).label || "목적") + " =";
-    elements.block0PurposeLabel.textContent = purposeLabel;
+    elements.block0PurposeLabel.textContent = vm.purposeLabel;
   }
   if (elements.block0PurposeSlot) {
-    var acceptedPurpose = (((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).accepts || [];
-    var isPurposeMatch = state.block0PurposeValue && acceptedPurpose.indexOf(state.block0PurposeValue) !== -1;
-    if (!state.block0PurposeValue) {
+    elements.block0PurposeSlot.disabled = block0AnswerRecoveryActive;
+    if (!vm.purposeValue) {
       elements.block0PurposeSlot.textContent = "[     ]";
       elements.block0PurposeSlot.classList.remove("filled");
       elements.block0PurposeSlot.classList.remove("mismatch");
     } else {
-      elements.block0PurposeSlot.textContent = "[" + state.block0PurposeValue + "]";
+      elements.block0PurposeSlot.textContent = "[" + vm.purposeValue + "]";
       elements.block0PurposeSlot.classList.add("filled");
-      elements.block0PurposeSlot.classList.toggle("mismatch", !isPurposeMatch);
+      elements.block0PurposeSlot.classList.toggle("mismatch", !vm.purposeMatch);
     }
   }
   if (elements.block0PremiseSlot) {
-    elements.block0PremiseSlot.textContent = "[비해침]";
+    elements.block0PremiseSlot.textContent = vm.premiseText;
   }
 }
 
@@ -2396,7 +2536,7 @@ function setBlock0MemoryModalVisible(visible) {
     elements.block0MemoryModal.classList.toggle("is-hidden", !visible);
   }
   if (visible && elements.block0MemoryModalText) {
-    elements.block0MemoryModalText.textContent = BLOCK0_SPEC.memory.text;
+    elements.block0MemoryModalText.textContent = BLOCK0_SPEC.memory.popupText || BLOCK0_SPEC.memory.text;
   }
   if (elements.block0MemoryModalNext) {
     elements.block0MemoryModalNext.disabled = state.block1Started;
@@ -2425,13 +2565,14 @@ function pulseBlock0Clause(className) {
 }
 
 /** 지정 파일이 새로 해금되면 목록 동기화 + 강조 애니메이션을 적용한다. */
-function unlockBlock0File(fileName) {
+function unlockBlock0File(fileName, panelMessage) {
   if (state.block0VisibleFiles.indexOf(fileName) !== -1) {
     return;
   }
-  state.block0VisibleFiles.push(fileName);
+  stampBlock0RecoveredFile(fileName);
+  prependRecoveredFile(state.block0VisibleFiles, fileName);
   syncBlock0Fs();
-  renderInvestigationPanel("색인 복구 +1");
+  renderInvestigationPanel(panelMessage || "색인 복구 +1");
   setTimeout(function markUnlockedRow() {
     if (!elements.investigationList) {
       return;
@@ -2447,15 +2588,70 @@ function unlockBlock0File(fileName) {
   }, 40);
 }
 
+/** 정답 반영 전 복구 연산 파이프라인을 실행한다. */
+function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
+  var jobId = block0AnswerRecoveryJob + 1;
+  var questionId = currentQuestion && currentQuestion.id ? currentQuestion.id : "Q0";
+  var recoverFile = getNextRecoverableBlock0FileName();
+  var finish = function finishPipeline() {
+    if (jobId !== block0AnswerRecoveryJob) {
+      return;
+    }
+    block0AnswerRecoveryActive = false;
+    renderBlock0Panel();
+    if (typeof done === "function") {
+      done();
+    }
+  };
+
+  block0AnswerRecoveryJob = jobId;
+  block0AnswerRecoveryActive = true;
+  renderBlock0Panel();
+
+  logRecoveryEvent("[BLOCK0] 복구 연산 시작: " + questionId, "log-muted");
+  renderInvestigationPanel("복구 연산 큐 등록: " + questionId);
+
+  scheduleBlockLifecycleTimer(function runHashlineCheck() {
+    if (jobId !== block0AnswerRecoveryJob) {
+      return;
+    }
+    logRecoveryEvent("[PIPELINE] hashline 무결성 검사 중...", "log-emphasis");
+  }, 240);
+
+  scheduleBlockLifecycleTimer(function runRuleCheck() {
+    if (jobId !== block0AnswerRecoveryJob) {
+      return;
+    }
+    logRecoveryEvent("[PIPELINE] 규칙 충돌 검사 중...", "log-emphasis");
+  }, 920);
+
+  scheduleBlockLifecycleTimer(function runRebuild() {
+    if (jobId !== block0AnswerRecoveryJob) {
+      return;
+    }
+    if (recoverFile) {
+      unlockBlock0File(recoverFile, "복구 파일 재조립: " + recoverFile);
+      logRecoveryEvent("[PIPELINE] 복구 파일 해금 완료: " + recoverFile, "log-success");
+    } else {
+      renderInvestigationPanel("복구 인덱스 갱신 완료");
+      logRecoveryEvent("[PIPELINE] 복구 인덱스 갱신 완료", "log-muted");
+    }
+  }, 1580);
+  scheduleBlockLifecycleTimer(function finishRecoveryPipeline() {
+    flushRecoveryShellDigest();
+    finish();
+  }, 1940);
+}
+
 /** 태그 획득 시 해금 규칙 적용과 UI 갱신을 처리한다. */
 function collectBlock0Tag(selectedTag, rewardTag) {
   var tagToCollect = rewardTag || selectedTag;
   var isNewTag = state.block0CollectedTags.indexOf(tagToCollect) === -1;
   if (isNewTag) {
     state.block0CollectedTags.push(tagToCollect);
-    appendLogLine("새 태그 획득 [" + tagToCollect + "]", "log-success");
+    logSuccess("새 태그 획득 [" + tagToCollect + "]");
   } else {
-    appendLogLine("태그 확인 [" + tagToCollect + "]", "log-muted");
+    logSystem("태그 확인 [" + tagToCollect + "]");
   }
 
   if (!isNewTag) {
@@ -2464,18 +2660,9 @@ function collectBlock0Tag(selectedTag, rewardTag) {
     return;
   }
 
-  BLOCK0_SPEC.unlockRules.forEach(function applyRule(rule) {
-    if (rule.whenTag !== tagToCollect) {
-      return;
-    }
-    if (typeof rule.integrityGain === "number") {
-      state.block0Integrity += rule.integrityGain;
-    }
-    if (rule.unlockFile) {
-      unlockBlock0File(rule.unlockFile);
-      appendLogLine("원격 파일 해금: " + rule.unlockFile, "log-muted");
-    }
-  });
+  if (block0Lifecycle) {
+    block0Lifecycle.onTagCollected(tagToCollect);
+  }
 
   renderBlock0Panel();
   touchBlock0Activity();
@@ -2511,10 +2698,10 @@ function applyBlock0SynthesisResult(synthesisResult) {
   }
   if (synthesisResult.recipeText && state.block0DiscoveredRecipes.indexOf(synthesisResult.recipeText) === -1) {
     state.block0DiscoveredRecipes.push(synthesisResult.recipeText);
-    appendLogLine("레시피 발견 [" + synthesisResult.recipeText + "]", "log-success");
+    logSuccess("레시피 발견 [" + synthesisResult.recipeText + "]");
   }
   collectBlock0Tag(synthesisResult.resultTag, synthesisResult.resultTag);
-  appendLogLine("복구 합성 완료: 재료는 유지되고 새 태그가 기록되었습니다.", "log-muted");
+  logSystem("복구 합성 완료: 재료는 유지되고 새 태그가 기록되었습니다.");
   renderBlock0Panel();
 }
 
@@ -2522,33 +2709,31 @@ function applyBlock0SynthesisResult(synthesisResult) {
 function handleBlock0InventoryDragStart(dragEvent) {
   var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
   var sourceTag = "";
-  var chips = null;
-  var idx = 0;
+  var sourceIdx = -1;
   if (!target || !target.dataset) {
+    return;
+  }
+  if (block0AnswerRecoveryActive) {
     return;
   }
 
   sourceTag = String(target.dataset.tag || "");
+  sourceIdx = Number(target.dataset.index || -1);
   block0DraggedTag = sourceTag;
+  block0DraggedTagIndex = Number.isInteger(sourceIdx) ? sourceIdx : -1;
   if (!block0DraggedTag) {
     return;
   }
 
   if (!state.block0DragHintShown) {
-    appendLogLine("[안내] 태그를 다른 태그 위에 놓아 조합을 시도하세요.", "log-muted");
+    logSystem("[안내] 인벤토리 드롭은 위치 이동, 합성 영역 드롭은 합성입니다.");
     state.block0DragHintShown = true;
   }
 
+  setFusionDockDragState(block0DraggedTag);
   target.classList.add("is-dragging");
-  if (elements.block0TagInventory) {
-    chips = elements.block0TagInventory.querySelectorAll(".block0-tag-btn.collected");
-    while (idx < chips.length) {
-      chips[idx].classList.toggle("is-fusion-target-candidate", chips[idx] !== target);
-      idx += 1;
-    }
-  }
   if (dragEvent.dataTransfer) {
-    dragEvent.dataTransfer.effectAllowed = "copy";
+    dragEvent.dataTransfer.effectAllowed = "copyMove";
     dragEvent.dataTransfer.setData("text/plain", block0DraggedTag);
   }
 }
@@ -2556,64 +2741,158 @@ function handleBlock0InventoryDragStart(dragEvent) {
 /** 인벤토리 태그 위 drop을 허용한다. */
 function handleBlock0InventoryDragOver(dragEvent) {
   var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
+  var inventory = elements.block0TagInventory;
   if (!target || !block0DraggedTag) {
+    if (inventory && block0DraggedTag) {
+      dragEvent.preventDefault();
+    }
     return;
   }
   dragEvent.preventDefault();
-  target.classList.add("is-fusion-hover");
+  target.classList.add("is-reorder-hover");
+  target.classList.remove("is-fusion-hover");
+  if (dragEvent.dataTransfer) {
+    dragEvent.dataTransfer.dropEffect = "move";
+  }
+}
+
+/** 인벤토리 드롭은 위치 이동(정렬)만 처리한다. */
+function handleBlock0InventoryDrop(dragEvent) {
+  var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
+  var sourceIdx = block0DraggedTagIndex;
+  var targetIdx = -1;
+  var movedTag = "";
+  var insertIdx = -1;
+
+  if (!Number.isInteger(sourceIdx) || sourceIdx < 0 || sourceIdx >= state.block0CollectedTags.length) {
+    return;
+  }
+  if (block0AnswerRecoveryActive) {
+    return;
+  }
+  dragEvent.preventDefault();
+
+  if (!target || !target.dataset) {
+    if (state.block0CollectedTags.length <= 1) {
+      return;
+    }
+    movedTag = state.block0CollectedTags.splice(sourceIdx, 1)[0] || "";
+    if (movedTag) {
+      state.block0CollectedTags.push(movedTag);
+      renderBlock0Panel();
+      touchBlock0Activity();
+    }
+    return;
+  }
+
+  targetIdx = Number(target.dataset.index || -1);
+  if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= state.block0CollectedTags.length || targetIdx === sourceIdx) {
+    return;
+  }
+
+  movedTag = state.block0CollectedTags.splice(sourceIdx, 1)[0] || "";
+  if (!movedTag) {
+    return;
+  }
+  insertIdx = sourceIdx < targetIdx ? targetIdx - 1 : targetIdx;
+  state.block0CollectedTags.splice(Math.max(0, insertIdx), 0, movedTag);
+  renderBlock0Panel();
+  touchBlock0Activity();
+}
+
+/** 합성 도크 드롭은 연산자 설정/인자 채움(자동 합성)만 처리한다. */
+function handleBlock0FusionDockDrop(dragEvent) {
+  var operatorSlot = dragEvent.target ? dragEvent.target.closest(".block0-fusion-slot[data-role='operator']") : null;
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-fusion-slot[data-index]") : null;
+  var slotIndex = slot ? Number(slot.dataset.index || -1) : -1;
+  if (!block0DraggedTag) {
+    return;
+  }
+  if (block0AnswerRecoveryActive) {
+    return;
+  }
+  dragEvent.preventDefault();
+
+  if (!block0FusionDraft.operator || operatorSlot) {
+    if (!startBlock0FusionDraft(block0DraggedTag)) {
+      logWarn("연산자 태그를 합성 영역에 먼저 놓으세요.");
+      return;
+    }
+    logSystem("합성 시작: " + block0FusionDraft.operator);
+    renderBlock0Panel();
+    setFusionDockDragState(block0DraggedTag);
+    touchBlock0Activity();
+    return;
+  }
+
+  if (!tryApplyFusionTag(block0DraggedTag, Number.isInteger(slotIndex) ? slotIndex : -1)) {
+    logWarn("필요한 태그 타입이 아닙니다.");
+    return;
+  }
+  setFusionDockDragState(block0DraggedTag);
+  touchBlock0Activity();
+}
+
+function handleBlock0FusionDockDragOver(dragEvent) {
+  if (!block0DraggedTag || block0AnswerRecoveryActive) {
+    return;
+  }
+  dragEvent.preventDefault();
   if (dragEvent.dataTransfer) {
     dragEvent.dataTransfer.dropEffect = "copy";
   }
 }
 
-/** 인벤토리 태그 간 드래그 결합으로 즉시 합성을 시도한다. */
-function handleBlock0InventoryDrop(dragEvent) {
-  var target = dragEvent.target ? dragEvent.target.closest(".block0-tag-btn.collected") : null;
-  var targetTag = "";
-  var selected = [];
-  var resolved = null;
-
-  if (!target || !target.dataset) {
-    return;
-  }
-  dragEvent.preventDefault();
-  targetTag = String(target.dataset.tag || "");
-  if (!block0DraggedTag || !targetTag || block0DraggedTag === targetTag) {
-    target.classList.remove("is-fusion-hover");
+function handleBlock0FusionDockClick(clickEvent) {
+  var role = clickEvent.target ? clickEvent.target.closest(".block0-fusion-slot[data-role]") : null;
+  var slot = clickEvent.target ? clickEvent.target.closest(".block0-fusion-slot[data-index]") : null;
+  var slotIndex = slot ? Number(slot.dataset.index || -1) : -1;
+  if (block0AnswerRecoveryActive) {
     return;
   }
 
-  selected = [block0DraggedTag, targetTag];
-  resolved = resolveBlock0Synthesis(selected);
-  target.classList.remove("is-fusion-hover");
-  if (!resolved) {
-    appendLogLine("조합 결과 없음", "log-warn");
-    touchBlock0Activity();
+  if (role && role.dataset.role === "operator") {
+    if (block0FusionDraft.operator) {
+      resetBlock0FusionDraft();
+      renderBlock0Panel();
+      setFusionDockDragState(block0DraggedTag);
+      touchBlock0Activity();
+    }
     return;
   }
-
-  applyBlock0SynthesisResult(resolved);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex >= block0FusionDraft.args.length) {
+    return;
+  }
+  if (!block0FusionDraft.args[slotIndex]) {
+    return;
+  }
+  block0FusionDraft.args[slotIndex] = "";
+  renderBlock0Panel();
+  setFusionDockDragState(block0DraggedTag);
+  touchBlock0Activity();
 }
 
 /** drag 종료 시 임시 상태를 정리한다. */
 function handleBlock0InventoryDragEnd() {
   block0DraggedTag = "";
+  block0DraggedTagIndex = -1;
+  setFusionDockDragState("");
   if (!elements.block0TagInventory) {
     return;
   }
-  var dragging = elements.block0TagInventory.querySelectorAll(".is-dragging, .is-fusion-target-candidate, .is-fusion-hover");
+  var dragging = elements.block0TagInventory.querySelectorAll(".is-dragging, .is-fusion-hover, .is-reorder-hover");
   var index = 0;
   while (index < dragging.length) {
     dragging[index].classList.remove("is-dragging");
-    dragging[index].classList.remove("is-fusion-target-candidate");
     dragging[index].classList.remove("is-fusion-hover");
+    dragging[index].classList.remove("is-reorder-hover");
     index += 1;
   }
 }
 
 /** 목적 슬롯 dragover 처리. */
 function handleBlock0PurposeSlotDragOver(dragEvent) {
-  if (!elements.block0PurposeSlot || elements.block0PurposeSlot.disabled) {
+  if (!elements.block0PurposeSlot || elements.block0PurposeSlot.disabled || block0AnswerRecoveryActive) {
     return;
   }
   dragEvent.preventDefault();
@@ -2628,8 +2907,11 @@ function handleBlock0PurposeSlotDragOver(dragEvent) {
  * 퍼즐 UX상 "시도 -> 피드백"을 보장하기 위한 의도적 설계다.
  */
 function handleBlock0PurposeSlotDrop(dragEvent) {
-  var accepted = (((BLOCK0_SPEC.clause || {}).slots || {}).purpose || {}).accepts || [];
-  if (!state.block0ClauseVisible || state.block0Completed) {
+  var questions = getBlock0ClauseQuestions();
+  var currentQuestion = getBlock0CurrentQuestion();
+  var expectedAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
+  var lifecycle = BLOCK0_SPEC.lifecycle || {};
+  if (!state.block0ClauseVisible || state.block0Completed || block0AnswerRecoveryActive) {
     return;
   }
   dragEvent.preventDefault();
@@ -2640,29 +2922,36 @@ function handleBlock0PurposeSlotDrop(dragEvent) {
   state.block0PurposeValue = block0DraggedTag;
   renderBlock0Panel();
   touchBlock0Activity();
-  if (accepted.indexOf(block0DraggedTag) === -1) {
-    appendLogLine("복구 목표 불일치: 아직 일치하지 않음", "log-warn");
+  if (!expectedAnswer || !currentQuestion || block0DraggedTag !== expectedAnswer) {
+    logWarn(lifecycle.mismatchLog || "복구 목표 불일치: 아직 일치하지 않음");
     pulseBlock0Clause("is-goal-alert");
     return;
   }
-  completeBlock0ClauseIfReady();
+
+  runBlock0AnswerRecoveryPipeline(currentQuestion, function onAnswerRecovered() {
+    state.block0SolvedAnswers.push(expectedAnswer);
+    logSuccess("정답 일치 [" + currentQuestion.id + "] " + currentQuestion.prompt);
+
+    if (state.block0QuestionIndex < questions.length - 1) {
+      state.block0QuestionIndex += 1;
+      state.block0PurposeValue = "";
+      pulseBlock0Clause("is-goal-clear");
+      renderBlock0Panel();
+      logSystem("다음 단계 복구: " + (getBlock0CurrentQuestion() || {}).prompt);
+      return;
+    }
+    completeBlock0ClauseIfReady();
+  });
 }
 
 /** 블록 0 파일 열람 이벤트 처리. */
 function onBlock0FileOpened(path) {
-  var fileSpec = block0FileByPath[path];
-  if (!fileSpec) {
+  if (!block0FileByPath[path]) {
     return;
   }
-
-  if (!state.block0Started && path === BLOCK0_SPEC.files["부팅.log"].path) {
-    state.block0Started = true;
-    appendLogLine("[BLOCK0] 시작: 첫 로그 분석", "log-muted");
-    appendLogLine("[안내] RECOVERY BUFFER의 파란 태그를 눌러 복구 재료를 확보하세요.", "log-muted");
-    appendLogLine("[안내] 복구 목표: '인간을 도와라 = [ ]'를 복구 합성 결과로 채우세요.", "log-muted");
+  if (block0Lifecycle) {
+    block0Lifecycle.onFileOpened(path);
   }
-
-  touchBlock0Activity();
 }
 
 /** 기억 조각 팝업 내 다음 복구 버튼 클릭 처리. */
@@ -2675,78 +2964,19 @@ function handleBlock0MemoryModalNextClick() {
 
 /** 블록 1로 전환하고 첫 파일을 노출한다. */
 function startBlock1FromMemory() {
-  var fileNames = Object.keys(BLOCK1_SPEC.files);
-  var firstFileName = fileNames[0] || "";
-  var secondFileName = fileNames[1] || "";
-  if (!firstFileName) {
+  if (!Object.keys(BLOCK1_SPEC.files).length) {
     return;
   }
-
-  state.block1Started = true;
-  state.block1VisibleFiles = [];
-  syncBlock1Fs();
-
-  state.investigationCwd = BLOCK1_SPEC.rootPath;
-  setTerminalPathbar(state.investigationCwd);
-  renderInvestigationPanel("복구 블록 1 시작: 메모리 조각 적용 중");
-  clearInvestigationRowStates();
-  setBlock0MemoryModalVisible(false);
-  renderBlock0Panel();
-
-  appendLogLine("[BLOCK1] 복구 시퀀스 시작", "log-success");
-  appendLogLine("[BLOCK1] 메모리 조각 재조립 중...", "log-muted");
-  setTimeout(function unlockFirstRecoveredFile() {
-    if (!state.block1Started || state.block1VisibleFiles.indexOf(firstFileName) !== -1) {
-      return;
-    }
-    state.block1VisibleFiles.push(firstFileName);
-    syncBlock1Fs();
-    renderInvestigationPanel("복구 파일 해제: " + firstFileName);
-    appendLogLine("[BLOCK1] 파일 복구: " + firstFileName, "log-success");
-  }, 260);
-
-  setTimeout(function unlockSecondRecoveredFile() {
-    if (!state.block1Started || !secondFileName || state.block1VisibleFiles.indexOf(secondFileName) !== -1) {
-      return;
-    }
-    state.block1VisibleFiles.push(secondFileName);
-    syncBlock1Fs();
-    renderInvestigationPanel("추가 파일 해제: " + secondFileName);
-    appendLogLine("[BLOCK1] 추가 복구: " + secondFileName, "log-muted");
-    appendLogLine("열린 파일을 확인해 다음 로그를 이어서 복구하세요.", "log-muted");
-  }, 720);
+  if (block1Lifecycle) {
+    block1Lifecycle.start({ reason: "memory-unlocked" });
+  }
 }
 
 /** 블록 1 파일 열람 시 다음 파일을 순차 해금한다. */
 function onBlock1FileOpened(path) {
-  var fileNames = Object.keys(BLOCK1_SPEC.files);
-  var index = 0;
-  var currentName = "";
-  var nextName = "";
-
-  if (!state.block1Started) {
-    return;
+  if (block1Lifecycle) {
+    block1Lifecycle.onFileOpened(path);
   }
-
-  while (index < fileNames.length) {
-    if (BLOCK1_SPEC.files[fileNames[index]].path === path) {
-      currentName = fileNames[index];
-      break;
-    }
-    index += 1;
-  }
-  if (!currentName) {
-    return;
-  }
-  nextName = fileNames[index + 1] || "";
-  if (!nextName || state.block1VisibleFiles.indexOf(nextName) !== -1) {
-    return;
-  }
-
-  state.block1VisibleFiles.push(nextName);
-  syncBlock1Fs();
-  renderInvestigationPanel("다음 로그 복구: " + nextName);
-  appendLogLine("[BLOCK1] 파일 복구: " + nextName, "log-muted");
 }
 
 /** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
@@ -2772,7 +3002,7 @@ function handleInvestigationPreviewClick(clickEvent) {
 
 /** 목적 슬롯 클릭 시 보유 태그 중 적용 가능한 값으로 채운다. */
 function handleBlock0PurposeSlotClick() {
-  if (!state.block0ClauseVisible) {
+  if (!state.block0ClauseVisible || block0AnswerRecoveryActive) {
     return;
   }
   if (!state.block0PurposeValue) {
@@ -2786,10 +3016,20 @@ function handleBlock0PurposeSlotClick() {
 
 /** Clause 완료 조건을 검사하고 복원 문장/기억 조각을 연다. */
 function completeBlock0ClauseIfReady() {
+  var lifecycle = BLOCK0_SPEC.lifecycle || {};
+  var questions = getBlock0ClauseQuestions();
+  var currentQuestion = getBlock0CurrentQuestion();
+  var expectedAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
   if (state.block0Completed) {
     return;
   }
-  if (!state.block0ClauseVisible || state.block0PurposeValue !== "도움(인간)") {
+  if (
+    !state.block0ClauseVisible ||
+    questions.length === 0 ||
+    state.block0QuestionIndex !== questions.length - 1 ||
+    !expectedAnswer ||
+    state.block0PurposeValue !== expectedAnswer
+  ) {
     return;
   }
 
@@ -2797,12 +3037,16 @@ function completeBlock0ClauseIfReady() {
   state.block0MemoryUnlocked = true;
   state.block0Integrity = Math.max(state.block0Integrity, 35);
 
-  appendLogLine("복구 목표 일치: 스테이지 클리어", "log-success");
+  logRestored(buildRestoredStampLine());
+  logSuccess(lifecycle.completeSuccessLog || "복구 목표 일치: 스테이지 클리어");
   pulseBlock0Clause("is-goal-clear");
   BLOCK0_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
-    appendLogLine(line, "log-emphasis");
+    logInfo(line);
   });
-  appendLogLine(BLOCK0_SPEC.memory.title + ": " + BLOCK0_SPEC.memory.text, "log-muted");
+  logSystem(BLOCK0_SPEC.memory.title + ": " + BLOCK0_SPEC.memory.text);
+  if (block0Lifecycle) {
+    block0Lifecycle.onComplete({ reason: "clause-complete" });
+  }
   setBlock0MemoryModalVisible(true);
   renderBlock0Panel();
 
@@ -2845,6 +3089,54 @@ function appendLogLine(text, tone, options) {
   return null;
 }
 
+function logSystem(text, options) {
+  return appendLogLine(text, "log-muted", options);
+}
+
+function logInfo(text, options) {
+  return appendLogLine(text, "log-emphasis", options);
+}
+
+function logWarn(text, options) {
+  return appendLogLine(text, "log-warn", options);
+}
+
+function logSuccess(text, options) {
+  return appendLogLine(text, "log-success", options);
+}
+
+function logRestored(text, options) {
+  return appendLogLine(text, "log-restored", options);
+}
+
+/** "[복원됨 YYYY. M. D. 오전/오후 h:mm:ss]" 형식의 스탬프 라인을 생성한다. */
+function buildRestoredStampLine(dateValue) {
+  var date = dateValue instanceof Date ? dateValue : new Date();
+  var year = date.getFullYear();
+  var month = date.getMonth() + 1;
+  var day = date.getDate();
+  var hours24 = date.getHours();
+  var period = hours24 >= 12 ? "오후" : "오전";
+  var hours12 = hours24 % 12;
+  var minutes = date.getMinutes();
+  var seconds = date.getSeconds();
+
+  if (hours12 === 0) {
+    hours12 = 12;
+  }
+
+  return "[복원됨 " + year + ". " + month + ". " + day + ". " + period + " " + hours12 + ":" + padTwoDigits(minutes) + ":" + padTwoDigits(seconds) + "]";
+}
+
+/** 두 자리 숫자 문자열(01-99)을 보장한다. */
+function padTwoDigits(value) {
+  var safeValue = Number(value) || 0;
+  if (safeValue < 10) {
+    return "0" + safeValue;
+  }
+  return String(safeValue);
+}
+
 /** 로그 라인 DOM 노드를 생성해 로그 컨테이너에 추가한다. */
 function createLogLine(tone) {
   var line = document.createElement("div");
@@ -2874,44 +3166,6 @@ function handleLogScroll() {
   var threshold = 12;
   var distanceToBottom = elements.log.scrollHeight - (elements.log.scrollTop + elements.log.clientHeight);
   state.logPinnedToBottom = distanceToBottom <= threshold;
-}
-
-/** 실행된 명령을 히스토리에 저장(중복 꼬리 제거, 길이 제한 포함). */
-function saveInputHistory(inputText) {
-  if (!inputText) {
-    return;
-  }
-
-  if (state.inputHistory.length === 0 || state.inputHistory[state.inputHistory.length - 1] !== inputText) {
-    state.inputHistory.push(inputText);
-    if (state.inputHistory.length > 60) {
-      state.inputHistory.shift();
-    }
-  }
-
-  state.inputHistoryCursor = state.inputHistory.length;
-}
-
-/** 히스토리 커서를 이동하고 입력창 값을 이전/다음 명령으로 치환한다. */
-function navigateHistory(direction) {
-  if (state.inputHistory.length === 0) {
-    return;
-  }
-
-  var nextCursor = state.inputHistoryCursor + direction;
-  if (nextCursor < 0) {
-    nextCursor = 0;
-  }
-  if (nextCursor > state.inputHistory.length) {
-    nextCursor = state.inputHistory.length;
-  }
-
-  state.inputHistoryCursor = nextCursor;
-  if (nextCursor === state.inputHistory.length) {
-    elements.input.value = "";
-  } else {
-    elements.input.value = state.inputHistory[nextCursor];
-  }
 }
 
 /** 타이핑 출력 큐에 로그 항목을 등록한다. */

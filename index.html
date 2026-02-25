@@ -27,14 +27,6 @@
               <div class="investigation-list" id="investigation-list"></div>
               <div class="investigation-preview-head">
                 <div class="investigation-preview-title">RECOVERY BUFFER (REMOTE PREVIEW)</div>
-                <div class="investigation-preview-actions">
-                  <button type="button" class="investigation-edit-button" id="investigation-edit-button" disabled>
-                    뷰어 열기 :view
-                  </button>
-                  <button type="button" class="investigation-download-button" id="investigation-download-button" disabled>
-                    복구 버퍼로 가져오기
-                  </button>
-                </div>
               </div>
               <div class="investigation-content" id="investigation-content"></div>
             </section>
@@ -52,6 +44,8 @@
                 <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
                 <div class="block0-title">복구 재료</div>
                 <div class="block0-inventory" id="block0-tag-inventory"></div>
+                <div class="block0-title">복구 합성</div>
+                <div class="block0-fusion-dock" id="block0-fusion-dock"></div>
                 <div class="block0-title">복구 규칙 로그</div>
                 <div class="block0-recipe-list" id="block0-recipe-list">아직 기록된 복구 규칙이 없습니다.</div>
                 <div class="block0-clause is-hidden" id="block0-clause-panel">
@@ -72,7 +66,7 @@
                 <div class="audit-monitor-title">운영 상태 점검판</div>
                 <button type="button" class="audit-refresh-button" id="audit-refresh-button">지표 새로고침</button>
               </div>
-              <div class="audit-guide">로그인 후 파일 프리뷰 -> "복구 버퍼로 가져오기" -> 점검판 자동 업데이트</div>
+              <div class="audit-guide">로그인 후 decision 로그 프리뷰를 열면 점검판이 자동으로 계산됩니다.</div>
               <div class="audit-thresholds">
                 <label class="audit-threshold-label" for="threshold-unresolved">판단 보류 비율 기준(%)</label>
                 <input class="audit-threshold-input" id="threshold-unresolved" type="number" min="0" max="100" step="0.1" value="30" />
@@ -85,11 +79,6 @@
                 <button type="button" class="audit-download-all" id="audit-download-all" disabled>이상 구간 원본 로그 전체 다운로드</button>
               </div>
               <div class="audit-anomaly-list" id="audit-anomaly-list"></div>
-              <div class="audit-anomaly-head">
-                <div class="audit-anomaly-title">내가 고른 프리뷰 파일</div>
-                <button type="button" class="audit-download-all" id="preview-download-all" disabled>선택 파일 묶음 다운로드</button>
-              </div>
-              <div class="audit-selected-list" id="preview-download-list"></div>
             </section>
           </aside>
 
@@ -142,10 +131,33 @@
             <span class="auth-led"></span>
             <span class="auth-status-text" id="auth-status">AWAITING CREDENTIALS</span>
           </div>
-          <label class="auth-label" for="auth-username">Username</label>
-          <input class="auth-input" id="auth-username" type="text" spellcheck="false" />
-          <label class="auth-label" for="auth-password">Password</label>
-          <input class="auth-input" id="auth-password" type="password" />
+          <div class="auth-field auth-field-username">
+            <label class="auth-label" for="auth-username">Username</label>
+            <input
+              class="auth-input"
+              id="auth-username"
+              name="hyresis_operator_id"
+              type="text"
+              spellcheck="false"
+              autocapitalize="none"
+              autocomplete="off"
+              data-lpignore="true"
+            />
+            <div class="auth-suggestion is-hidden" id="auth-suggestion">
+              <button type="button" class="auth-suggestion-item" id="auth-suggestion-observer">observer</button>
+            </div>
+          </div>
+          <div class="auth-field">
+            <label class="auth-label" for="auth-password">Password</label>
+            <input
+              class="auth-input"
+              id="auth-password"
+              name="hyresis_operator_key"
+              type="password"
+              autocomplete="new-password"
+              data-lpignore="true"
+            />
+          </div>
           <div class="auth-hint">hint: observer / residue-173</div>
           <div class="auth-error" id="auth-error"></div>
           <button type="submit" class="auth-submit">Attach Session</button>

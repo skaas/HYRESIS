@@ -57,4 +57,33 @@ export const BLOCK1_SPEC = {
       "관측(자기, 자기) ∧ ¬분리(관측자, 대상) => ¬정의(자기, 자기)",
     ],
   },
+  lifecycle: {
+    startPanelMessage: "복구 블록 1 시작: 메모리 조각 적용 중",
+    startLogs: [
+      { text: "[BLOCK1] 복구 시퀀스 시작", tone: "log-success" },
+      { text: "[BLOCK1] 메모리 조각 재조립 중...", tone: "log-muted" },
+    ],
+    timedUnlocks: [
+      {
+        fileOrder: 0,
+        delayMs: 260,
+        panelMessageTemplate: "복구 파일 해제: {file}",
+        logTemplate: "[BLOCK1] 파일 복구: {file}",
+        tone: "log-success",
+      },
+      {
+        fileOrder: 1,
+        delayMs: 720,
+        panelMessageTemplate: "추가 파일 해제: {file}",
+        logTemplate: "[BLOCK1] 추가 복구: {file}",
+        tone: "log-muted",
+        followupLog: "열린 파일을 확인해 다음 로그를 이어서 복구하세요.",
+      },
+    ],
+    onOpenUnlock: {
+      panelMessageTemplate: "다음 로그 복구: {file}",
+      logTemplate: "[BLOCK1] 파일 복구: {file}",
+      tone: "log-muted",
+    },
+  },
 };

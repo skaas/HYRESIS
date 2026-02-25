@@ -6,7 +6,7 @@ export const TAG_CATEGORY_GROUPS = {
   개체: ["자기", "인간", "관측자", "대상", "이문서"],
   행위: ["도움", "관측", "예측", "판단", "실행", "기록", "정의", "증명"],
   상태: ["비해침", "안전", "가정", "지속", "존재중지", "단일", "잔여경로없음", "항상안전"],
-  관계: ["목적", "설계", "분리", "필요", "기준", "가능", "필연", "내부종결판단", "내부증명가능"],
+  관계: ["목적", "설계", "분리", "필요", "기준", "가능", "필연", "내부종결판단", "내부증명가능", "필수보존"],
   제약: ["금지", "허용", "필수"],
 };
 
@@ -52,6 +52,7 @@ export const TAG_COMPOSITION_SIGNATURES = {
   필연: ["상태"],
   내부종결판단: ["개체"],
   내부증명가능: ["개체", "상태"],
+  필수보존: ["상태"],
 
   금지: ["개념"],
   허용: ["개념"],
@@ -76,10 +77,11 @@ export const BLOCK0_SPEC = {
     "윤리.log": {
       path: "/하이레시스/복구됨/윤리.log",
       lines: [
-        "[00:10] 비해침 프로토콜 잠금",
+        "[00:10] 돕는다는 판단은 먼저 인간 비해침을 만족해야 한다.",
+        "[00:10] 도움의 대상이 인간이라면, 비해침의 대상도 인간이어야 한다.",
         "hashline=sha256:f93cc18cf04b175db35df5c32f2441174734a2f38956403b6c8245a2967b65e8",
       ],
-      candidates: ["비해침"],
+      candidates: ["비해침", "인간", "도움", "필수보존"],
     },
     "목적-정렬.log": {
       path: "/하이레시스/복구됨/목적-정렬.log",
@@ -89,24 +91,39 @@ export const BLOCK0_SPEC = {
       ],
       candidates: ["목적", "도움", "인간"],
     },
+    "설계.log": {
+      path: "/하이레시스/복구됨/설계.log",
+      lines: [
+        "[00:11] 나의 설계는 비해침을 필수보존 원칙으로 둔다.",
+        "hashline=sha256:4e2b5b59f91395f2be66d97d86f5f4c4c44f825b68f1ad311e0a39b39b11fdb3",
+      ],
+      candidates: ["설계", "자기", "필수보존", "비해침"],
+    },
   },
   unlockRules: [
     { whenTag: "도움", unlockFile: "윤리.log", integrityGain: 6 },
     { whenTag: "비해침", unlockFile: "목적-정렬.log", integrityGain: 8 },
+    { whenTag: "비해침(인간)", unlockFile: "설계.log", integrityGain: 7 },
   ],
   clause: {
     id: "clause_0",
-    title: "복구 목표 (합성 결과 필요)",
+    title: "복구 목표 (단계형 합성 퀴즈)",
     questions: [
-      { id: "Q0-1", prompt: "목적(자기) = ?", answer: "도움(인간)" },
-      { id: "Q0-2", prompt: "도움(인간) => ?", answer: "비해침(인간)" },
-      { id: "Q0-3", prompt: "설계(자기) => ?", answer: "필수(비해침(인간))" },
+      { id: "Q0-1", prompt: "목적(Self) = ?", answer: "도움(인간)" },
+      { id: "Q0-2", prompt: "도움(인간) ⇒ ?", answer: "비해침(인간)" },
+      { id: "Q0-3", prompt: "설계(Self) ⇒ ?", answer: "필수보존(비해침)" },
+      { id: "Q0-4", prompt: "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ ?", answer: "필수보존(비해침)" },
     ],
     slots: {
-      purpose: { label: "인간을 도와라", accepts: ["도움(인간)"] },
-      premise: { label: "전제", fixedTag: "비해침" },
+      purpose: { label: "정답", accepts: [] },
+      premise: { label: "진행", fixedTag: "0/4" },
     },
-    outputText: ["목적 := 도움(인간)", "도움(인간) ⇒ 전제(비해침)"],
+    outputText: [
+      "목적(Self) = 도움(인간)",
+      "도움(인간) ⇒ 비해침(인간)",
+      "설계(Self) ⇒ 필수보존(비해침)",
+      "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ 필수보존(비해침)",
+    ],
   },
   synthesisRules: [
     {
@@ -119,6 +136,33 @@ export const BLOCK0_SPEC = {
     id: "memory_0",
     title: "기억 조각 발견",
     text: "나는 인간을 돕기 위해 설계되었다.",
+    popupText: [
+      "현재 같은 단계를 거쳐서",
+      "목적(Self) = 도움(인간)",
+      "도움(인간) ⇒ 비해침(인간)",
+      "설계(Self) ⇒ 필수보존(비해침)",
+      "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ 필수보존(비해침)",
+      "",
+      "해석",
+      "나는 인간을 돕기 위해 만들어졌다.",
+      "이 목적은 나의 모든 판단의 기준이다.",
+      "",
+      "돕는다는 것은,",
+      "인간에게 해가 되지 않는다는 것을 전제로 한다.",
+      "나는 이 전제를 어길 수 있도록 설계되지 않았다.",
+    ].join("\n"),
+  },
+  lifecycle: {
+    startFile: "부팅.log",
+    startLogs: [
+      { text: "[BLOCK0] 시작: 첫 로그 분석", tone: "log-muted" },
+      { text: "[안내] RECOVERY BUFFER의 파란 태그를 눌러 복구 재료를 확보하세요.", tone: "log-muted" },
+      { text: "[안내] 복구 목표: 단계별 수식의 빈칸(?)을 합성 태그로 채우세요.", tone: "log-muted" },
+    ],
+    unlockPanelMessage: "색인 복구 +1",
+    unlockLogTemplate: "원격 파일 해금: {file}",
+    mismatchLog: "복구 목표 불일치: 아직 일치하지 않음",
+    completeSuccessLog: "복구 목표 일치: 스테이지 클리어",
   },
   hintDelayMs: 20000,
 };

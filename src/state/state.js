@@ -19,8 +19,6 @@ export const state = {
   inputEnabled: false,
   logQueue: [],
   typingActive: false,
-  inputHistory: [],
-  inputHistoryCursor: -1,
   phase: FLOW_PHASE.BOOTING,
   investigationBooting: false,
   investigationCwd: "/하이레시스",
@@ -32,6 +30,8 @@ export const state = {
   block0CollectedTags: [],
   block0ClauseVisible: true,
   block0PurposeValue: "",
+  block0QuestionIndex: 0,
+  block0SolvedAnswers: [],
   block0MemoryUnlocked: false,
   block0DragHintShown: false,
   block0IdleHintTimer: 0,
@@ -51,6 +51,8 @@ export const elements = {
   authForm: null,
   authUsername: null,
   authPassword: null,
+  authSuggestion: null,
+  authSuggestionObserver: null,
   authError: null,
   authStatus: null,
   systemOverlay: null,
@@ -63,10 +65,9 @@ export const elements = {
   investigationPath: null,
   investigationList: null,
   investigationContent: null,
-  investigationEditButton: null,
-  investigationDownloadButton: null,
   block0Status: null,
   block0TagInventory: null,
+  block0FusionDock: null,
   block0RecipeList: null,
   block0ClausePanel: null,
   block0ClauseTitle: null,
@@ -81,22 +82,12 @@ export const elements = {
   auditKpiGrid: null,
   auditAnomalyList: null,
   auditDownloadAll: null,
-  previewDownloadAll: null,
-  previewDownloadList: null,
   thresholdUnresolved: null,
   thresholdLatency: null,
   terminalPathbar: null,
-  input: null,
-  submit: null,
-  form: null,
 };
 
 /** phase 상태 전환 헬퍼. */
 export function setFlowPhase(phase) {
   state.phase = phase;
-}
-
-/** 터미널 입력 가능 조건 체크(세션 연결 후 STREAMING 상태에서만 허용). */
-export function canUseTerminalInput() {
-  return state.inputEnabled && state.phase === FLOW_PHASE.STREAMING;
 }
