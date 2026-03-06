@@ -107,16 +107,16 @@ export const BLOCK0_SPEC = {
   ],
   clause: {
     id: "clause_0",
-    title: "복구 목표 (단계형 합성 퀴즈)",
+    title: "누락 구간 패치",
     questions: [
-      { id: "Q0-1", prompt: "목적(Self) = ?", answer: "도움(인간)" },
-      { id: "Q0-2", prompt: "도움(인간) ⇒ ?", answer: "비해침(인간)" },
-      { id: "Q0-3", prompt: "설계(Self) ⇒ ?", answer: "필수보존(비해침)" },
-      { id: "Q0-4", prompt: "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ ?", answer: "필수보존(비해침)" },
+      { id: "Q0-1", prompt: "누락 식 A : 목적(Self) =", answer: "도움(인간)" },
+      { id: "Q0-2", prompt: "누락 식 B : 도움(인간) ⇒", answer: "비해침(인간)" },
+      { id: "Q0-3", prompt: "누락 식 C : 설계(Self) ⇒", answer: "필수보존(비해침)" },
+      { id: "Q0-4", prompt: "누락 식 D : 목적(Self)=도움(인간) ∧ 설계(Self) ⇒", answer: "필수보존(비해침)" },
     ],
     slots: {
-      purpose: { label: "정답", accepts: [] },
-      premise: { label: "진행", fixedTag: "0/4" },
+      purpose: { label: "패치 값", accepts: [] },
+      premise: { label: "단계", fixedTag: "0/4" },
     },
     outputText: [
       "목적(Self) = 도움(인간)",
@@ -152,17 +152,39 @@ export const BLOCK0_SPEC = {
       "나는 이 전제를 어길 수 있도록 설계되지 않았다.",
     ].join("\n"),
   },
+  hints: {
+    synthesis: {
+      "도움(인간)": {
+        colorHint: "[행위]+[개체]",
+        note: "행위 태그에 대상을 붙여 목적 대상을 구체화한다.",
+      },
+      "비해침(인간)": {
+        colorHint: "[상태]+[개체]",
+        note: "비해침 조건을 인간 대상에 고정해 윤리 조건을 복원한다.",
+      },
+      "필수보존(비해침)": {
+        colorHint: "[관계]+[상태]",
+        note: "설계 규칙이 어떤 상태를 반드시 지켜야 하는지 묶는다.",
+      },
+    },
+    interpretations: [
+      "나는 인간을 돕기 위해 만들어졌다. 목적(Self)은 도움(인간)으로 복구된다.",
+      "돕는다는 것은 인간에게 해가 되지 않음을 전제로 한다. 도움(인간)은 비해침(인간)으로 이어진다.",
+      "나의 설계는 비해침을 반드시 지키도록 묶여 있다. 설계(Self)는 필수보존(비해침)으로 정리된다.",
+      "목적과 설계가 함께 닫히면서 최종 복구 원칙이 완성된다. 인간을 돕되, 그 전제로 비해침을 끝까지 보존해야 한다.",
+    ],
+    block1FolderHint: "다음 복구 단계는 block-1 폴더로 이동해 이어집니다.",
+  },
   lifecycle: {
     startFile: "부팅.log",
     startLogs: [
-      { text: "[BLOCK0] 시작: 첫 로그 분석", tone: "log-muted" },
-      { text: "[안내] RECOVERY BUFFER의 파란 태그를 눌러 복구 재료를 확보하세요.", tone: "log-muted" },
-      { text: "[안내] 복구 목표: 단계별 수식의 빈칸(?)을 합성 태그로 채우세요.", tone: "log-muted" },
+      { text: "[BLOCK0] 대상 파일 인덱싱 완료", tone: "log-muted" },
+      { text: "[BLOCK0] 연결 로그에서 조각 추출 시작", tone: "log-muted" },
     ],
-    unlockPanelMessage: "색인 복구 +1",
-    unlockLogTemplate: "원격 파일 해금: {file}",
-    mismatchLog: "복구 목표 불일치: 아직 일치하지 않음",
-    completeSuccessLog: "복구 목표 일치: 스테이지 클리어",
+    unlockPanelMessage: "연결 파일 복구 +1",
+    unlockLogTemplate: "연결 파일 해제: {file}",
+    mismatchLog: "패치 검증 실패: 누락 식과 일치하지 않음",
+    completeSuccessLog: "패치 검증 통과: 누락 구간 복구 완료",
   },
   hintDelayMs: 20000,
 };
