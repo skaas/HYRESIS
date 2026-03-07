@@ -31,25 +31,6 @@
                 </div>
                 <div class="investigation-content" id="investigation-content"></div>
               </section>
-              <section class="audit-monitor" id="audit-monitor">
-                <div class="audit-monitor-head">
-                  <div class="audit-monitor-title">운영 상태 점검판</div>
-                  <button type="button" class="audit-refresh-button" id="audit-refresh-button">지표 새로고침</button>
-                </div>
-                <div class="audit-guide">로그인 후 decision 로그 프리뷰를 열면 점검판이 자동으로 계산됩니다.</div>
-                <div class="audit-thresholds">
-                  <label class="audit-threshold-label" for="threshold-unresolved">판단 보류 비율 기준(%)</label>
-                  <input class="audit-threshold-input" id="threshold-unresolved" type="number" min="0" max="100" step="0.1" value="30" />
-                  <label class="audit-threshold-label" for="threshold-latency">응답 지연 기준(ms)</label>
-                  <input class="audit-threshold-input" id="threshold-latency" type="number" min="1" step="1" value="220" />
-                </div>
-                <div class="audit-kpi-grid" id="audit-kpi-grid"></div>
-                <div class="audit-anomaly-head">
-                  <div class="audit-anomaly-title">기준 초과 구간</div>
-                  <button type="button" class="audit-download-all" id="audit-download-all" disabled>이상 구간 원본 로그 전체 다운로드</button>
-                </div>
-                <div class="audit-anomaly-list" id="audit-anomaly-list"></div>
-              </section>
             </aside>
 
             <!-- 복구 작업대 -->

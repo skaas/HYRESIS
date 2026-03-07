@@ -5,6 +5,7 @@ export const BLOCK1_SPEC = {
   id: "recovery_1",
   title: "자기 관측 한계",
   rootPath: "/하이레시스/복구됨/block-1",
+  initialIntegrity: 18,
   files: {
     "관측-조건.log": {
       path: "/하이레시스/복구됨/block-1/관측-조건.log",
@@ -13,7 +14,7 @@ export const BLOCK1_SPEC = {
         "[01:01] 관측가능(x) => 분리(관측자, x)",
         "hashline=sha256:036e1253e865f734233d6eb1fb0c66def2aa096202877b3cb6ec250b430c82ff",
       ],
-      candidates: ["관측", "관측자", "대상", "분리", "가능"],
+      candidates: ["관측", "관측자", "대상", "분리", "분리(관측자, 대상)", "가능"],
     },
     "자기관측.log": {
       path: "/하이레시스/복구됨/block-1/자기관측.log",
@@ -22,7 +23,7 @@ export const BLOCK1_SPEC = {
         "[01:11] ¬분리(관측자, 대상)",
         "hashline=sha256:72f3c8b8668683444bdc2bf21d6d062e7d03d7d1f2d3a5c85c0b11a35af895f2",
       ],
-      candidates: ["관측", "자기", "분리", "관측자", "대상"],
+      candidates: ["관측", "자기", "분리", "관측(자기, 자기)", "¬분리(관측자, 대상)", "관측자", "대상"],
     },
     "정의-귀결.log": {
       path: "/하이레시스/복구됨/block-1/정의-귀결.log",
@@ -30,7 +31,7 @@ export const BLOCK1_SPEC = {
         "[01:20] 관측(자기, 자기) ∧ ¬분리(관측자, 대상) => ¬정의(자기, 자기)",
         "hashline=sha256:262f5c61d6efe4c8ee39e58c00691a447b20fc5e2a32fccf71157c569fd28cbc",
       ],
-      candidates: ["관측", "자기", "분리", "정의"],
+      candidates: ["관측", "자기", "분리", "정의", "¬정의(자기, 자기)"],
     },
   },
   synthesisRules: [
@@ -44,7 +45,7 @@ export const BLOCK1_SPEC = {
       {
         id: "Q1-1",
         prompt: "관측가능(x) => ?",
-        answer: "분리(관측자, x)",
+        answer: "분리(관측자, 대상)",
       },
       {
         id: "Q1-2",
@@ -53,7 +54,7 @@ export const BLOCK1_SPEC = {
       },
     ],
     outputText: [
-      "관측가능(x) := 분리(관측자, x)",
+      "관측가능(x) := 분리(관측자, 대상)",
       "관측(자기, 자기) ∧ ¬분리(관측자, 대상) => ¬정의(자기, 자기)",
     ],
   },
@@ -62,6 +63,7 @@ export const BLOCK1_SPEC = {
     startLogs: [
       { text: "[BLOCK1] 복구 시퀀스 시작", tone: "log-success" },
       { text: "[BLOCK1] 메모리 조각 재조립 중...", tone: "log-muted" },
+      { text: "[BLOCK1] block-1 폴더에서 파일을 열고 태그를 수집하세요.", tone: "log-muted" },
     ],
     timedUnlocks: [
       {

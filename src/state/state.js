@@ -38,6 +38,14 @@ export const state = {
   block0DiscoveredRecipes: [],
   block1Started: false,
   block1VisibleFiles: [],
+  block1Completed: false,
+  block1Integrity: 18,
+  block1CollectedTags: [],
+  block1ClauseVisible: false,
+  block1PurposeValue: "",
+  block1QuestionIndex: 0,
+  block1SolvedAnswers: [],
+  block1DiscoveredRecipes: [],
 };
 
 /**
@@ -81,13 +89,6 @@ export const elements = {
   block0MemoryModal: null,
   block0MemoryModalText: null,
   block0MemoryModalNext: null,
-  auditMonitor: null,
-  auditRefreshButton: null,
-  auditKpiGrid: null,
-  auditAnomalyList: null,
-  auditDownloadAll: null,
-  thresholdUnresolved: null,
-  thresholdLatency: null,
   terminalPathbar: null,
 };
 
