@@ -2273,6 +2273,8 @@ function renderInvestigationPanel(message) {
   var vm = null;
   var rowHeader = null;
   var index = 0;
+  var previewParentPath = "";
+  var shouldPreservePreview = false;
 
   if (!elements.investigationList || !elements.investigationPath || !elements.investigationContent) {
     return;
@@ -2317,6 +2319,15 @@ function renderInvestigationPanel(message) {
 
   if (vm.previewMessage) {
     setInvestigationPreview(vm.previewMessage, previewFilePath, previewFileLines);
+    return;
+  }
+  previewParentPath = previewFilePath ? normalizePath(previewFilePath + "/..") : "";
+  shouldPreservePreview =
+    Boolean(previewFilePath) &&
+    previewFileLines.length > 0 &&
+    previewParentPath === normalizePath(state.investigationCwd || "");
+  if (shouldPreservePreview) {
+    setInvestigationPreview(previewFileLines.join("\n"), previewFilePath, previewFileLines);
     return;
   }
   setInvestigationPreview(DEFAULT_PREVIEW_HINT, "", []);
