@@ -342,6 +342,31 @@ function getBlock0UnlockSequenceFiles() {
   return ordered;
 }
 
+function getBlock0UnlockRuleByFile(fileName) {
+  var rules = Array.isArray(BLOCK0_SPEC.unlockRules) ? BLOCK0_SPEC.unlockRules : [];
+  var index = 0;
+  while (index < rules.length) {
+    if (String((rules[index] && rules[index].unlockFile) || "") === String(fileName || "")) {
+      return rules[index];
+    }
+    index += 1;
+  }
+  return null;
+}
+
+function isBlock0UnlockRuleSatisfied(fileName) {
+  var rule = getBlock0UnlockRuleByFile(fileName);
+  var requiredTag = "";
+  if (!rule) {
+    return true;
+  }
+  requiredTag = String(rule.whenTag || "");
+  if (!requiredTag) {
+    return true;
+  }
+  return state.block0CollectedTags.indexOf(requiredTag) !== -1;
+}
+
 function getBlock0CurrentTargetFileName() {
   var sequence = getBlock0UnlockSequenceFiles();
   var idx = Number(state.block0QuestionIndex || 0);
@@ -1985,6 +2010,8 @@ function getFsChildrenRows(cwd, entry) {
   var questionTargetFile = "";
   var currentQuestion = null;
   var currentRequirementTag = "";
+  var targetRule = null;
+  var isTargetReady = false;
 
   if (cwd === block0Root && !state.block0Completed) {
     state.block0VisibleFiles.forEach(function markVisible(fileName) {
@@ -2014,9 +2041,11 @@ function getFsChildrenRows(cwd, entry) {
       return !visibleSet[fileName];
     });
     questionTargetFile = getBlock0CurrentTargetFileName();
-    nextRecoverableFile = questionTargetFile || getNextRecoverableBlock0FileName();
+    targetRule = getBlock0UnlockRuleByFile(questionTargetFile);
+    isTargetReady = isBlock0UnlockRuleSatisfied(questionTargetFile);
+    nextRecoverableFile = isTargetReady ? (questionTargetFile || getNextRecoverableBlock0FileName()) : "";
     currentQuestion = getBlock0CurrentQuestion();
-    currentRequirementTag = currentQuestion ? String(currentQuestion.answer || "") : "";
+    currentRequirementTag = targetRule ? String(targetRule.whenTag || "") : "";
     index = 0;
     while (index < hidden.length) {
       var hiddenName = hidden[index];
@@ -2034,7 +2063,7 @@ function getFsChildrenRows(cwd, entry) {
           recoverable: isRecoverable,
           blocked: !isRecoverable,
           requiredTag: isRecoverable ? currentRequirementTag : "",
-          requiredFile: !isRecoverable ? nextRecoverableFile : "",
+          requiredFile: !isRecoverable ? questionTargetFile : "",
         },
       });
       index += 1;
@@ -2127,7 +2156,7 @@ function renderRecoverablePreviewPrompt(fileName, requiredTag) {
 
   line2 = document.createElement("div");
   line2.className = "preview-recovery-note";
-  line2.textContent = "목적(Self) = " + (safeTag || "조건 확인 필요");
+  line2.textContent = "준비 조건 태그: " + (safeTag || "조건 확인 필요");
   elements.investigationContent.appendChild(line2);
 
   line3 = document.createElement("div");
@@ -2841,6 +2870,7 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
 
   if (!isNewTag) {
     renderBlock0Panel();
+    renderInvestigationPanel();
     touchBlock0Activity();
     return;
   }
@@ -2850,6 +2880,7 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
   }
 
   renderBlock0Panel();
+  renderInvestigationPanel();
   if (targetPrefix === "block0") {
     touchBlock0Activity();
   }
@@ -3221,7 +3252,7 @@ function handleInvestigationPreviewClick(clickEvent) {
     state.block0PurposeValue = "";
     renderBlock0Panel();
     pulseBlock0Clause("is-goal-alert");
-    logSystem("복구 문제 로드: " + pendingFile + " · 목적(Self) = " + (pendingTag || "조건 확인 필요") + " · 태그 합성 후 슬롯에 드롭");
+    logSystem("복구 문제 로드: " + pendingFile + " · 준비 조건 태그 " + (pendingTag || "조건 확인 필요") + " 확인 · 태그 합성 후 슬롯에 드롭");
     block0PendingRecoveryPrompt = null;
     return;
   }
