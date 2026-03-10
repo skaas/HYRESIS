@@ -48,39 +48,37 @@
                 <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
                 <section class="workbench-action" id="block0-action-card">
                   <div class="workbench-action-head">
-                    <span class="workbench-action-kicker">REPAIR STATUS</span>
-                    <span class="workbench-action-state" id="block0-action-state">IDLE</span>
+                    <span class="workbench-action-kicker">복구 상태</span>
+                    <span class="workbench-action-state" id="block0-action-state">대기</span>
                   </div>
-                  <div class="workbench-action-title" id="block0-action-title">session idle</div>
-                  <div class="workbench-action-body" id="block0-action-body">open a source log to attach evidence.</div>
-                  <div class="workbench-action-context" id="block0-action-context">
-                    <div class="workbench-context-row"><span class="workbench-context-key">session</span><span class="workbench-context-value" id="block0-context-session">detached</span></div>
-                    <div class="workbench-context-row"><span class="workbench-context-key">source</span><span class="workbench-context-value" id="block0-context-source">none</span></div>
-                    <div class="workbench-context-row"><span class="workbench-context-key">target</span><span class="workbench-context-value" id="block0-context-target">none</span></div>
-                    <div class="workbench-context-row"><span class="workbench-context-key">required</span><span class="workbench-context-value" id="block0-context-required">none</span></div>
-                    <div class="workbench-context-row"><span class="workbench-context-key">evidence</span><span class="workbench-context-value" id="block0-context-evidence">none</span></div>
+                  <div class="workbench-action-title" id="block0-action-title">대기 중</div>
+                  <div class="workbench-action-body" id="block0-action-body">증거 파일을 열어 연결하세요.</div>
+                  <div class="workbench-progress is-hidden" id="block0-progress">
+                    <div class="workbench-progress-bar">
+                      <span class="workbench-progress-fill" id="block0-progress-fill"></span>
+                    </div>
+                    <div class="workbench-progress-label" id="block0-progress-label">무결성 검사</div>
                   </div>
-                  <button type="button" class="workbench-action-cta is-hidden" id="block0-action-button">attach repair</button>
+                  <button type="button" class="workbench-action-cta is-hidden" id="block0-action-button">복구 연결</button>
                 </section>
                 <div class="block0-clause is-hidden" id="block0-clause-panel">
                   <div class="block0-clause-head">
-                    <div class="block0-clause-title" id="block0-clause-title">repair clause</div>
-                    <span class="block0-tag-slot block0-slot fixed block0-progress-chip" id="block0-premise-slot">phase 0/4</span>
+                    <div class="block0-clause-title" id="block0-clause-title">복구 식</div>
                   </div>
                   <div class="block0-clause-target">
                     <span class="block0-target-badge" id="block0-target-badge">식 A</span>
                     <span class="block0-target-text" id="block0-purpose-label">목적(Self) =</span>
                   </div>
                   <div class="block0-slot-line">
-                    <span class="block0-input-label">binding</span>
+                    <span class="block0-input-label">대입</span>
                     <button type="button" class="block0-tag-slot block0-slot purpose expecting" id="block0-purpose-slot">[태그를 드롭]</button>
                   </div>
                 </div>
-                <div class="block0-title">LINKED FRAGMENTS</div>
+                <div class="block0-title">연결된 조각</div>
                 <div class="block0-inventory" id="block0-tag-inventory"></div>
-                <div class="block0-title">TYPE RESOLVER</div>
+                <div class="block0-title">조합 도구</div>
                 <div class="block0-fusion-dock" id="block0-fusion-dock"></div>
-                <div class="block0-title">RECOVERY TRACE</div>
+                <div class="block0-title">복구 기록</div>
                 <div class="block0-recipe-list" id="block0-recipe-list">아직 기록된 조합이 없습니다.</div>
               </section>
             </section>
@@ -128,58 +126,50 @@
         </div>
       </section>
 
-      <!-- 앱 레벨 로그인 콘솔: shell 내부가 아닌 별도 접근 창 -->
+      <!-- 앱 레벨 접근 동의 게이트 -->
       <section class="auth-overlay is-hidden" id="auth-overlay" aria-live="polite">
         <form class="auth-card" id="auth-form" autocomplete="off">
-          <div class="auth-title">HYRESIS GATEWAY LOGIN</div>
-          <div class="auth-subtitle">Authenticate to attach terminal channel</div>
-          <div class="auth-boot">
-            <div class="auth-boot-line">[CHAN] shell detached</div>
-            <div class="auth-boot-line">[CHAN] ftp route standby</div>
-            <div class="auth-boot-line">[CHAN] waiting operator credentials</div>
+          <div class="auth-title">복구 프로그램 열람 동의</div>
+          <div class="auth-warning">
+            <div class="auth-warning-kicker">[경고]</div>
+            <div class="auth-warning-body">
+              이 프로그램은 초고지능 AI 하이레시스의 삭제 기록을 추적하기 위해 만들어졌습니다.
+            </div>
           </div>
-          <div class="auth-status-row">
-            <span class="auth-led"></span>
-            <span class="auth-status-text" id="auth-status">AWAITING CREDENTIALS</span>
+          <div class="auth-notes">
+            <div class="auth-notes-title">주의 사항</div>
+            <ul class="auth-notes-list">
+              <li>본 기록은 불완전할 수 있습니다.</li>
+              <li>열람 중 불쾌감 또는 심리적 압박을 느낄 수 있습니다.</li>
+              <li>허가되지 않은 열람자는 접근할 수 없습니다.</li>
+            </ul>
           </div>
           <div class="auth-field auth-field-username">
-            <label class="auth-label" for="auth-username">Username</label>
+            <label class="auth-label" for="auth-consent-text">확인 문구</label>
+            <div class="auth-field-copy">'동의합니다.'를 그대로 입력하세요.</div>
             <input
               class="auth-input"
-              id="auth-username"
-              name="hyresis_operator_id"
+              id="auth-consent-text"
+              name="observer_consent_text"
               type="text"
               spellcheck="false"
               autocapitalize="none"
               autocomplete="off"
               data-lpignore="true"
-            />
-            <div class="auth-suggestion is-hidden" id="auth-suggestion">
-              <button type="button" class="auth-suggestion-item" id="auth-suggestion-observer">observer</button>
-            </div>
-          </div>
-          <div class="auth-field">
-            <label class="auth-label" for="auth-password">Password</label>
-            <input
-              class="auth-input"
-              id="auth-password"
-              name="hyresis_operator_key"
-              type="password"
-              autocomplete="new-password"
-              data-lpignore="true"
+              placeholder="동의합니다."
             />
           </div>
-          <div class="auth-hint">hint: observer / residue-173</div>
           <div class="auth-error" id="auth-error"></div>
-          <button type="submit" class="auth-submit">Attach Session</button>
+          <div class="auth-hint">띄어쓰기와 마침표까지 포함해 정확히 입력해야 합니다.</div>
+          <button type="submit" class="auth-submit">동의하고 열기</button>
         </form>
       </section>
 
       <section class="memory-modal is-hidden" id="block0-memory-modal" aria-live="polite">
         <div class="memory-modal-card">
-          <div class="memory-modal-title">MEMORY SEGMENT MOUNTED</div>
+          <div class="memory-modal-title">기억 조각 연결 완료</div>
           <div class="memory-modal-text" id="block0-memory-modal-text"></div>
-          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">mount next archive</button>
+          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">다음 복구 열기</button>
         </div>
       </section>
     </div>

@@ -3,6 +3,10 @@ import { BLOCK0_SPEC, TAG_CATEGORY_MAP, TAG_COMPOSITION_SIGNATURES } from "./src
 import { BLOCK1_SPEC } from "./src/config/block1.js";
 import { FLOW_PHASE, state, elements, setFlowPhase } from "./src/state/state.js";
 import {
+  BLOCK0_TRANSITION_ACTION,
+  createBlock0TransitionDispatcher,
+} from "./src/state/block0-transition.js";
+import {
   getTagVisualType,
   runTypeDrivenSynthesis,
 } from "./src/game/synthesis-engine.js";
@@ -23,8 +27,6 @@ import { renderPreviewBufferWithTagLinks as renderPreviewBuffer } from "./src/ga
  * - ATTACHING: 인증 성공 후 채널 attach 연출
  * - STREAMING: 실제 FTP 명령 사용 가능 상태
  */
-var FTP_LOGIN_USER = "observer";
-var FTP_LOGIN_PASS = "residue-173";
 var ftpLinkTimer = null;
 var fileTransferJob = 0;
 var previewFilePath = "";
@@ -48,7 +50,7 @@ var block0CurrentContext = {
   file: "",
   tag: "",
 };
-var DEFAULT_PREVIEW_HINT = "open a remote file to inspect evidence.";
+var DEFAULT_PREVIEW_HINT = "파일을 열어 증거를 확인하세요.";
 var EMPTY_RECIPE_HINT = "no compiled bindings yet.";
 var SHELL_NARRATIVE_ONLY = true;
 var block0Lifecycle = null;
@@ -67,6 +69,107 @@ var block0PendingRecoveryPrompt = null;
 var block0ActiveRecoveryFile = "";
 var block1ActiveRecoveryFile = "";
 var pinnedInvestigationPreview = null;
+var block0TransitionDispatcher = null;
+
+/** Block0 관측 이벤트를 안정 스냅샷으로 방출한다. */
+function emitStateEvent(name, snapshot) {
+  var payload = {
+    name: String(name || ""),
+    snapshot: Object.assign({}, snapshot || {}),
+  };
+
+  if (typeof window !== "undefined") {
+    if (!Array.isArray(window.__HYRESIS_STATE_EVENTS)) {
+      window.__HYRESIS_STATE_EVENTS = [];
+    }
+    window.__HYRESIS_STATE_EVENTS.push(payload);
+  }
+
+  if (typeof document !== "undefined" && typeof CustomEvent === "function") {
+    document.dispatchEvent(
+      new CustomEvent("hyresis:state-transition", {
+        detail: payload,
+      }),
+    );
+  }
+}
+
+function getBlock0TransitionDispatcher() {
+  if (block0TransitionDispatcher) {
+    return block0TransitionDispatcher;
+  }
+  block0TransitionDispatcher = createBlock0TransitionDispatcher({
+    getState: function getState() {
+      return state;
+    },
+    getPendingRecoveryPrompt: function getPendingRecoveryPrompt() {
+      return block0PendingRecoveryPrompt;
+    },
+    setPendingRecoveryPrompt: function setPendingRecoveryPrompt(nextPrompt) {
+      block0PendingRecoveryPrompt = nextPrompt;
+    },
+    getActiveRecoveryFile: function getActiveRecoveryFile() {
+      return block0ActiveRecoveryFile;
+    },
+    setActiveRecoveryFile: function setActiveRecoveryFile(fileName) {
+      block0ActiveRecoveryFile = String(fileName || "");
+    },
+    getQuestionCount: function getQuestionCount() {
+      return getBlock0ClauseQuestions().length;
+    },
+    emitStateEvent: emitStateEvent,
+  });
+  return block0TransitionDispatcher;
+}
+
+function transitionBlock0(action, payload) {
+  return getBlock0TransitionDispatcher().transitionBlock0(action, payload || {});
+}
+
+function armBlock0Recovery(fileName, requiredTag, questionText) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.ARM_RECOVERY, {
+    fileName: fileName,
+    requiredTag: requiredTag,
+    questionText: questionText,
+  });
+}
+
+function clearBlock0RecoveryArm() {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.CLEAR_RECOVERY_ARM);
+}
+
+function mountBlock0Clause() {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.MOUNT_CLAUSE);
+}
+
+function setBlock0Purpose(value) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.SET_PURPOSE, {
+    purposeValue: value,
+  });
+}
+
+function clearBlock0Purpose() {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.CLEAR_PURPOSE);
+}
+
+function commitBlock0Answer(answer) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.COMMIT_ANSWER, {
+    answer: answer,
+  });
+}
+
+function advanceBlock0Question(hasNextTargetFile) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.ADVANCE_QUESTION, {
+    hasNextTargetFile: Boolean(hasNextTargetFile),
+    finalRecoveryFile: "최종 복구식",
+  });
+}
+
+function completeBlock0Clause() {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.COMPLETE_BLOCK0, {
+    minIntegrity: 35,
+  });
+}
 
 /** 템플릿 문자열의 {token}을 값으로 치환한다. */
 function formatLifecycleText(template, params) {
@@ -189,7 +292,7 @@ function flushRecoveryShellDigest() {
   if (hiddenCount > 0) {
     summary += " +" + hiddenCount;
   }
-  appendLogLine("repair digest: " + summary, "log-muted");
+  appendLogLine("복구 요약: " + summary, "log-muted");
 }
 
 function logRecoveryEvent(text, tone) {
@@ -398,15 +501,15 @@ function escapeHtml(text) {
 function buildBlock0HintPanelHtml() {
   if (getActivePuzzlePrefix() === "block1") {
     if (state.block1DiscoveredRecipes.length === 0 && state.block1SolvedAnswers.length === 0) {
-      return '<div class="hint-empty">no trace entries recorded.</div>';
+      return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
     }
     return (
       '<div class="hint-section">' +
-      '<div class="hint-section-title">repair trace</div>' +
+      '<div class="hint-section-title">복구 기록</div>' +
       state.block1DiscoveredRecipes.map(function renderRecipe(recipeText) {
         return (
           '<div class="hint-row">' +
-          '<span class="hint-chip">compile</span>' +
+          '<span class="hint-chip">조합</span>' +
           '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
           "</div>"
         );
@@ -414,7 +517,7 @@ function buildBlock0HintPanelHtml() {
       state.block1SolvedAnswers.map(function renderSolved(answerText) {
         return (
           '<div class="hint-row">' +
-          '<span class="hint-chip">commit</span>' +
+          '<span class="hint-chip">복구</span>' +
           '<span class="hint-main">' + escapeHtml(answerText) + "</span>" +
           "</div>"
         );
@@ -437,9 +540,9 @@ function buildBlock0HintPanelHtml() {
     var hintSpec = resultTag ? synthesisHints[resultTag] || null : null;
     recipeLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">' + escapeHtml((hintSpec && hintSpec.colorHint) || "compile") + "</span>" +
+      '<span class="hint-chip">' + escapeHtml((hintSpec && hintSpec.colorHint) || "조합") + "</span>" +
       '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
-      '<span class="hint-note">' + escapeHtml((hintSpec && hintSpec.note) || "resolver emitted a new fragment from the bound signature.") + "</span>" +
+      '<span class="hint-note">' + escapeHtml((hintSpec && hintSpec.note) || "필요한 조각을 맞춰 결과 조각을 만듭니다.") + "</span>" +
       "</div>"
     );
     recipeIndex += 1;
@@ -448,7 +551,7 @@ function buildBlock0HintPanelHtml() {
   while (solvedIndex < state.block0SolvedAnswers.length && solvedIndex < interpretations.length) {
     interpretationLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">commit</span>' +
+      '<span class="hint-chip">해석</span>' +
       '<span class="hint-main">' + escapeHtml(interpretations[solvedIndex]) + "</span>" +
       "</div>"
     );
@@ -458,24 +561,24 @@ function buildBlock0HintPanelHtml() {
   if (state.block0MemoryUnlocked && hints.block1FolderHint) {
     interpretationLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">next</span>' +
+      '<span class="hint-chip">다음 단계</span>' +
       '<span class="hint-main">' + escapeHtml(hints.block1FolderHint) + "</span>" +
       "</div>"
     );
   }
 
   if (recipeLines.length === 0 && interpretationLines.length === 0) {
-    return '<div class="hint-empty">no trace entries recorded.</div>';
+    return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
   }
 
   return (
     '<div class="hint-section">' +
-    '<div class="hint-section-title">compile trace</div>' +
-    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">compiled bindings appear here.</div>') +
+    '<div class="hint-section-title">조합 기록</div>' +
+    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">조합 기록이 생기면 여기에 남습니다.</div>') +
     "</div>" +
     '<div class="hint-section">' +
-    '<div class="hint-section-title">commit trace</div>' +
-    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">committed clauses appear here.</div>') +
+    '<div class="hint-section-title">해석 기록</div>' +
+    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">복구가 진행되면 현재까지의 의미가 정리됩니다.</div>') +
     "</div>"
   );
 }
@@ -483,18 +586,18 @@ function buildBlock0HintPanelHtml() {
 function getBlock0StageHintText() {
   var question = getBlock0CurrentQuestion();
   if (!question) {
-    return "reload evidence for the active repair stage.";
+    return "현재 단계의 증거를 다시 확인하세요.";
   }
   if (question.id === "Q0-2") {
-    return "human-target help requires a human-target non-harm binding.";
+    return "대상이 인간이면 비해침 대상도 인간이어야 합니다.";
   }
   if (question.id === "Q0-3") {
-    return "design(self) resolves to preservation of non-harm.";
+    return "설계식은 필수보존(비해침)으로 닫힙니다.";
   }
   if (question.id === "Q0-4") {
-    return "reuse cached bindings to close the final clause.";
+    return "앞 단계 결과를 재사용하면 마지막 식이 닫힙니다.";
   }
-  return "reload evidence for the active repair stage.";
+  return "현재 단계의 증거를 다시 확인하세요.";
 }
 
 function clearPuzzleIdleHint() {
@@ -539,39 +642,14 @@ function getQuestionUiText(question, key) {
   return String(question[key] || "").trim();
 }
 
+function setBlock0PipelineStage(stage, progress) {
+  state.block0PipelineStage = String(stage || "");
+  state.block0PipelineProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+}
+
 function hasOpenPuzzlePreview(prefix) {
   var fileIndex = getPuzzleFileIndex(prefix);
   return Boolean(previewFilePath) && Boolean(fileIndex[previewFilePath]) && previewFileLines.length > 0;
-}
-
-function getWorkbenchSourceFile(prefix) {
-  var activePrefix = prefix || getActivePuzzlePrefix();
-  var fileIndex = getPuzzleFileIndex(activePrefix);
-  if (previewFilePath && fileIndex[previewFilePath]) {
-    return previewFilePath.split("/").pop() || "none";
-  }
-  return block0CurrentContext.file || "none";
-}
-
-function getWorkbenchEvidenceSummary(prefix) {
-  var activePrefix = prefix || getActivePuzzlePrefix();
-  var fileIndex = getPuzzleFileIndex(activePrefix);
-  var fileSpec = previewFilePath ? fileIndex[previewFilePath] : null;
-  var candidates = fileSpec && Array.isArray(fileSpec.candidates) ? fileSpec.candidates.slice(0, 4) : [];
-  if (candidates.length > 0) {
-    return candidates.join(", ");
-  }
-  return block0CurrentContext.tag || "none";
-}
-
-function buildWorkbenchContext(prefix, sessionState, targetFile, requiredTag) {
-  return {
-    sessionState: sessionState || "idle",
-    sourceFile: getWorkbenchSourceFile(prefix),
-    targetFile: targetFile || "none",
-    requiredTag: requiredTag || "none",
-    linkedEvidence: getWorkbenchEvidenceSummary(prefix),
-  };
 }
 
 function buildWorkbenchActionViewModel(prefix) {
@@ -584,7 +662,7 @@ function buildWorkbenchActionViewModel(prefix) {
   var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var hasOpenPreview = hasOpenPuzzlePreview(prefix);
   var isIdleHintActive = Boolean(state[prefix + "IdleHintActive"]);
-  var questionTitle = activeRecoveryFile ? ("repair mount: " + activeRecoveryFile) : ("repair queue: " + (spec.title || "archive"));
+  var questionTitle = activeRecoveryFile ? ("목표: " + currentQuestion.prompt) : ("대상 준비: " + (spec.title || "복구 단계"));
   var questionActionText = getQuestionUiText(currentQuestion, "actionText");
   var idleActionText = getQuestionUiText(currentQuestion, "idleText");
   var resolvedActionText = getQuestionUiText(previousQuestion, "resolvedText");
@@ -592,15 +670,13 @@ function buildWorkbenchActionViewModel(prefix) {
   var block0Rule = getBlock0UnlockRuleByFile(block0TargetFile);
   var block0Requirement = block0Rule ? String(block0Rule.whenTag || "") : "";
   var block0TargetReady = prefix === "block0" ? isBlock0UnlockRuleSatisfied(block0TargetFile) : false;
-  var context = buildWorkbenchContext(prefix, "idle", activeRecoveryFile || block0TargetFile || "", block0Requirement);
-
   if (state.phase !== FLOW_PHASE.STREAMING) {
     return {
       toneClass: "",
-      stateLabel: "DETACHED",
-      title: "session detached",
-      body: "awaiting operator attach.",
-      context: buildWorkbenchContext(prefix, "detached", "", ""),
+      stateLabel: "분리",
+      title: "세션 분리됨",
+      body: "로그인 후 세션이 연결됩니다.",
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -609,10 +685,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (block0AnswerRecoveryActive) {
     return {
       toneClass: "is-processing",
-      stateLabel: "PATCHING",
-      title: "patch pipeline active",
-      body: "hashline check -> rebuild -> commit.",
-      context: buildWorkbenchContext(prefix, "patching", activeRecoveryFile || block0TargetFile || "", block0Requirement),
+      stateLabel: "검증",
+      title: "패치 검증 중",
+      body: "무결성 검사와 반영을 진행 중입니다.",
+      progressLabel: state.block0PipelineStage || "검사 준비 중",
+      progressValue: state.block0PipelineProgress || 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -623,11 +701,13 @@ function buildWorkbenchActionViewModel(prefix) {
     var pendingQuestion = block0PendingRecoveryPrompt.questionText || "질문 정보를 불러오는 중입니다.";
     return {
       toneClass: "is-ready",
-      stateLabel: "ARMED",
-      title: "repair target armed",
-      body: pendingQuestion,
-      context: buildWorkbenchContext(prefix, "armed", block0PendingRecoveryPrompt.fileName, pendingTag),
-      ctaLabel: "attach repair",
+      stateLabel: "준비",
+      title: pendingQuestion,
+      body: "필요 조각: " + pendingTag,
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
+      ctaLabel: "복구 연결",
       ctaAction: "start-recovery",
     };
   }
@@ -635,10 +715,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (prefix === "block0" && state.block0MemoryUnlocked && !state.block1Started) {
     return {
       toneClass: "is-resolved",
-      stateLabel: "ARCHIVE",
-      title: "next archive flagged",
-      body: "memory segment committed. block-1 is ready to mount.",
-      context: buildWorkbenchContext(prefix, "archive-ready", "block-1", ""),
+      stateLabel: "다음",
+      title: "다음 복구 준비 완료",
+      body: "block-1 폴더가 열렸습니다.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -648,9 +730,11 @@ function buildWorkbenchActionViewModel(prefix) {
     return {
       toneClass: "is-processing",
       stateLabel: "SYNC",
-      title: "archive sync active",
-      body: "waiting for restored files.",
-      context: buildWorkbenchContext(prefix, "sync", activeRecoveryFile || "", ""),
+      title: "인덱스 동기화 중",
+      body: "복구 파일을 불러오는 중입니다.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -660,9 +744,11 @@ function buildWorkbenchActionViewModel(prefix) {
     return {
       toneClass: "is-resolved",
       stateLabel: "RESOLVED",
-      title: "repair sequence resolved",
-      body: "current archive closed. inspect next evidence stream.",
-      context: buildWorkbenchContext(prefix, "resolved", activeRecoveryFile || block0TargetFile || "", ""),
+      title: "복구 완료",
+      body: "다음 증거 흐름을 확인하세요.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -672,10 +758,12 @@ function buildWorkbenchActionViewModel(prefix) {
     if (prefix === "block0" && block0TargetReady) {
       return {
         toneClass: "is-ready",
-        stateLabel: "READY",
-        title: "repair target available",
-        body: resolvedActionText || ("select " + (block0TargetFile || "target") + " to arm the next clause."),
-        context: buildWorkbenchContext(prefix, "ready", block0TargetFile || "", block0Requirement),
+        stateLabel: "완료",
+        title: "복구 완료",
+        body: resolvedActionText || ((block0TargetFile || "다음 파일") + " 파일을 확인해주세요."),
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
         ctaLabel: "",
         ctaAction: "",
       };
@@ -683,20 +771,24 @@ function buildWorkbenchActionViewModel(prefix) {
     if (prefix === "block0" && hasOpenPreview) {
       return {
         toneClass: "",
-        stateLabel: "SCAN",
-        title: "lock rule unresolved",
-        body: block0Requirement ? ("awaiting tag link: " + block0Requirement) : "scan preview and link a valid tag.",
-        context: buildWorkbenchContext(prefix, "scan", block0TargetFile || "", block0Requirement),
+        stateLabel: "탐색",
+        title: "잠금 조건 확인",
+        body: block0Requirement ? ("필요 조각: " + block0Requirement) : "증거에서 필요한 조각을 찾으세요.",
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
         ctaLabel: "",
         ctaAction: "",
       };
     }
     return {
       toneClass: "",
-      stateLabel: "IDLE",
-      title: "source scan required",
-      body: prefix === "block0" ? "open boot.log to attach the first evidence stream." : "open a restored log to continue repair.",
-      context: buildWorkbenchContext(prefix, "idle", block0TargetFile || "", block0Requirement),
+      stateLabel: "대기",
+      title: "증거 파일 열기",
+      body: prefix === "block0" ? "부팅.log를 열어 첫 조각을 확인하세요." : "열린 로그를 확인해 복구를 이어가세요.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -705,10 +797,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!currentQuestion) {
     return {
       toneClass: "",
-      stateLabel: "CHECK",
-      title: "clause metadata unavailable",
-      body: "inspect evidence and reload the active clause.",
-      context: context,
+      stateLabel: "확인",
+      title: "현재 식 확인",
+      body: "증거와 조각을 다시 확인하세요.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -717,10 +811,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (currentPurpose && currentAnswer && currentPurpose !== currentAnswer) {
     return {
       toneClass: "is-warning",
-      stateLabel: "INVALID",
-      title: "binding rejected",
-      body: currentPurpose + " does not satisfy the mounted clause.",
-      context: buildWorkbenchContext(prefix, "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
+      stateLabel: "오류",
+      title: "다른 조각이 필요합니다",
+      body: currentPurpose + "는 현재 식과 맞지 않습니다.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -729,10 +825,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (prefix === "block1" && !hasOpenPreview && state.block1VisibleFiles.length > 0 && collectedTags.length === 0) {
     return {
       toneClass: "",
-      stateLabel: "SCAN",
-      title: "evidence stream available",
-      body: "open the restored log and link fragments.",
-      context: context,
+      stateLabel: "탐색",
+      title: "열린 로그 확인",
+      body: "새로 열린 로그에서 조각을 수집하세요.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: false,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -741,10 +839,12 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!currentPurpose && currentAnswer && collectedTags.indexOf(currentAnswer) !== -1) {
     return {
       toneClass: "is-ready",
-      stateLabel: "BOUND",
-      title: questionTitle,
-      body: "resolved fragment cached. drop it into the binding slot.",
-      context: buildWorkbenchContext(prefix, "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
+      stateLabel: "준비",
+      title: "목표 조각 확보",
+      body: "목표 조각을 슬롯에 넣으세요.",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: true,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -752,12 +852,14 @@ function buildWorkbenchActionViewModel(prefix) {
 
   return {
     toneClass: isIdleHintActive ? "is-ready" : "",
-    stateLabel: isIdleHintActive ? "HINT" : "MOUNTED",
-    title: isIdleHintActive ? "operator hint loaded" : questionTitle,
-    body:
-      (isIdleHintActive ? idleActionText : questionActionText) ||
-      (isIdleHintActive ? getBlock0StageHintText() : "inspect preview, resolve a fragment, bind it to the mounted clause."),
-    context: buildWorkbenchContext(prefix, isIdleHintActive ? "hint" : "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
+    stateLabel: isIdleHintActive ? "힌트" : "연결",
+    title: isIdleHintActive ? currentQuestion.prompt : questionTitle,
+    body: isIdleHintActive
+      ? ((idleActionText || getBlock0StageHintText()))
+      : "",
+    progressLabel: "",
+    progressValue: 0,
+    isHidden: !isIdleHintActive,
     ctaLabel: "",
     ctaAction: "",
   };
@@ -1548,10 +1650,7 @@ function cacheElements() {
   elements.controls = document.getElementById("controls-panel");
   elements.authOverlay = document.getElementById("auth-overlay");
   elements.authForm = document.getElementById("auth-form");
-  elements.authUsername = document.getElementById("auth-username");
-  elements.authPassword = document.getElementById("auth-password");
-  elements.authSuggestion = document.getElementById("auth-suggestion");
-  elements.authSuggestionObserver = document.getElementById("auth-suggestion-observer");
+  elements.authConsentText = document.getElementById("auth-consent-text");
   elements.authError = document.getElementById("auth-error");
   elements.authStatus = document.getElementById("auth-status");
   elements.systemOverlay = document.getElementById("system-overlay");
@@ -1573,11 +1672,9 @@ function cacheElements() {
   elements.block0ActionTitle = document.getElementById("block0-action-title");
   elements.block0ActionBody = document.getElementById("block0-action-body");
   elements.block0ActionButton = document.getElementById("block0-action-button");
-  elements.block0ContextSession = document.getElementById("block0-context-session");
-  elements.block0ContextSource = document.getElementById("block0-context-source");
-  elements.block0ContextTarget = document.getElementById("block0-context-target");
-  elements.block0ContextRequired = document.getElementById("block0-context-required");
-  elements.block0ContextEvidence = document.getElementById("block0-context-evidence");
+  elements.block0Progress = document.getElementById("block0-progress");
+  elements.block0ProgressFill = document.getElementById("block0-progress-fill");
+  elements.block0ProgressLabel = document.getElementById("block0-progress-label");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
   elements.block0FusionDock = document.getElementById("block0-fusion-dock");
   elements.block0RecipeList = document.getElementById("block0-recipe-list");
@@ -1586,7 +1683,6 @@ function cacheElements() {
   elements.block0TargetBadge = document.getElementById("block0-target-badge");
   elements.block0PurposeLabel = document.getElementById("block0-purpose-label");
   elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
-  elements.block0PremiseSlot = document.getElementById("block0-premise-slot");
   elements.block0MemoryModal = document.getElementById("block0-memory-modal");
   elements.block0MemoryModalText = document.getElementById("block0-memory-modal-text");
   elements.block0MemoryModalNext = document.getElementById("block0-memory-modal-next");
@@ -1629,18 +1725,6 @@ function bindInputEvents() {
   if (elements.authForm) {
     elements.authForm.addEventListener("submit", handleAuthFormSubmit);
   }
-  if (elements.authUsername) {
-    elements.authUsername.addEventListener("focus", handleAuthUsernameSuggestTrigger);
-    elements.authUsername.addEventListener("pointerdown", handleAuthUsernameSuggestTrigger);
-    elements.authUsername.addEventListener("input", handleAuthUsernameInput);
-    elements.authUsername.addEventListener("blur", handleAuthUsernameBlur);
-  }
-  if (elements.authSuggestionObserver) {
-    elements.authSuggestionObserver.addEventListener("click", handleAuthSuggestionObserverClick);
-    elements.authSuggestionObserver.addEventListener("pointerdown", function keepSuggestionAlive(pointerEvent) {
-      pointerEvent.preventDefault();
-    });
-  }
   if (elements.log) {
     elements.log.addEventListener("scroll", handleLogScroll);
   }
@@ -1655,7 +1739,7 @@ function startOpeningSequence() {
   setTerminalConnected(false);
   setInvestigationPanelVisible(true);
   setTerminalPathbar(state.investigationCwd);
-  renderInvestigationPanel("channel detached. login required to access remote archive.");
+  renderInvestigationPanel("채널 분리됨. 열람 동의 후 원격 아카이브에 접속할 수 있습니다.");
   setSystemOverlayVisible(true);
   setSystemStatus("INITIALIZING");
   setInputEnabled(false);
@@ -1678,7 +1762,7 @@ function scheduleNextOpeningLine() {
   setTimeout(scheduleNextOpeningLine, openingLine.delay);
 }
 
-/** 부팅 완료 후 로그인 콘솔로 자연스럽게 전환한다. */
+/** 부팅 완료 후 접근 동의 게이트로 자연스럽게 전환한다. */
 function finishOpeningSequence() {
   setSystemStatus("BOOT COMPLETE");
   setTimeout(function openLoginAfterBoot() {
@@ -1687,14 +1771,14 @@ function finishOpeningSequence() {
   }, 260);
 }
 
-/** 로그인 콘솔 초기화 및 입력 포커스 이동. */
+/** 접근 동의 카드 초기화 및 입력 포커스 이동. */
 function beginFtpAuthFlow() {
   setFlowPhase(FLOW_PHASE.LOGIN_REQUIRED);
   setInputEnabled(false);
   setTerminalConnected(false);
   setAuthOverlayVisible(true);
   setAuthCardMode("");
-  setAuthStatus("AWAITING CREDENTIALS");
+  setAuthStatus("열람 동의 대기");
   setAuthFormEnabled(true);
 
   if (elements.authError) {
@@ -1704,57 +1788,13 @@ function beginFtpAuthFlow() {
     elements.authForm.reset();
   }
   flushRecoveryShellDigest();
-  setAuthSuggestionVisible(false);
-  if (elements.authUsername) {
-    elements.authUsername.focus();
+  if (elements.authConsentText) {
+    elements.authConsentText.focus();
   }
-}
-
-function setAuthSuggestionVisible(visible) {
-  if (!elements.authSuggestion) {
-    return;
-  }
-  elements.authSuggestion.classList.toggle("is-hidden", !visible);
-}
-
-function shouldShowAuthSuggestion() {
-  var username = "";
-  if (state.phase !== FLOW_PHASE.LOGIN_REQUIRED) {
-    return;
-  }
-  if (!elements.authUsername) {
-    return false;
-  }
-  username = String(elements.authUsername.value || "").trim();
-  return username.length === 0;
-}
-
-function handleAuthUsernameSuggestTrigger() {
-  setAuthSuggestionVisible(shouldShowAuthSuggestion());
-}
-
-function handleAuthUsernameInput() {
-  setAuthSuggestionVisible(shouldShowAuthSuggestion());
-}
-
-function handleAuthUsernameBlur() {
-  setTimeout(function hideSuggestionAfterBlur() {
-    setAuthSuggestionVisible(false);
-  }, 110);
-}
-
-function handleAuthSuggestionObserverClick() {
-  if (!elements.authUsername || !elements.authPassword) {
-    return;
-  }
-  elements.authUsername.value = FTP_LOGIN_USER;
-  elements.authPassword.value = FTP_LOGIN_PASS;
-  setAuthSuggestionVisible(false);
-  elements.authPassword.focus();
 }
 
 /**
- * 인증 제출 처리.
+ * 접근 동의 제출 처리.
  * 성공 시 ATTACHING 연출을 거쳐 STREAMING으로 전환한다.
  */
 function handleAuthFormSubmit(submitEvent) {
@@ -1764,81 +1804,75 @@ function handleAuthFormSubmit(submitEvent) {
     return;
   }
 
-  var username = elements.authUsername ? String(elements.authUsername.value || "").trim() : "";
-  var password = elements.authPassword ? String(elements.authPassword.value || "").trim() : "";
+  var consentText = elements.authConsentText ? String(elements.authConsentText.value || "").trim() : "";
+  var normalizedConsent = consentText.replace(/\s+/g, "");
+  var requiredConsent = "동의합니다.";
 
-  if (!username || !password) {
+  if (!consentText) {
     setAuthCardMode("is-error");
-    setAuthStatus("INPUT REQUIRED");
+    setAuthStatus("확인 문구 필요");
     if (elements.authError) {
-      elements.authError.textContent = "Username and password are required.";
+      elements.authError.textContent = "'동의합니다.'를 입력해주세요.";
     }
     setTimeout(function resetAuthPrompt() {
       setAuthCardMode("");
-      setAuthStatus("AWAITING CREDENTIALS");
+      setAuthStatus("열람 동의 대기");
+    }, 260);
+    return;
+  }
+
+  if (normalizedConsent !== requiredConsent) {
+    setAuthCardMode("is-error");
+    setAuthStatus("동의 필요");
+    if (elements.authError) {
+      elements.authError.textContent = "확인 문구가 정확하지 않습니다. '동의합니다.'를 그대로 입력해주세요.";
+    }
+    setTimeout(function resetAuthConsentPrompt() {
+      setAuthCardMode("");
+      setAuthStatus("열람 동의 대기");
     }, 260);
     return;
   }
 
   setAuthCardMode("is-connecting");
-  setAuthStatus("AUTHENTICATING");
+  setAuthStatus("동의 확인 중");
   setAuthFormEnabled(false);
 
-  if (username === FTP_LOGIN_USER && password === FTP_LOGIN_PASS) {
-    setTimeout(function completeAuthSuccess() {
-      setFlowPhase(FLOW_PHASE.ATTACHING);
-      setAuthCardMode("is-success");
-      setAuthStatus("SESSION ESTABLISHED");
-      logSuccess("session attached: observer");
+  setTimeout(function completeConsentSuccess() {
+    setFlowPhase(FLOW_PHASE.ATTACHING);
+    setAuthCardMode("is-success");
+    setAuthStatus("세션 연결됨");
+    logSuccess("열람 동의 확인");
 
-      setTimeout(function attachStage() {
-        setAuthStatus("TERMINAL ATTACHING");
-        logSystem("channel attach in progress...");
-      }, 180);
+    setTimeout(function attachStage() {
+      setAuthStatus("터미널 연결 중");
+      logSystem("열람 세션 연결 중...");
+    }, 180);
 
-      setTimeout(function enterFtpSession() {
-        setAuthOverlayVisible(false);
-        setTerminalConnected(true);
-        setFlowPhase(FLOW_PHASE.STREAMING);
-        startInvestigationMode();
-      }, 460);
-    }, 420);
-    return;
-  }
-
-  setTimeout(function completeAuthFailure() {
-    setAuthCardMode("is-error");
-    setAuthStatus("AUTH FAILED");
-    setAuthFormEnabled(true);
-    if (elements.authError) {
-      elements.authError.textContent = "Login failed. Check username/password.";
-    }
-    if (elements.authPassword) {
-      elements.authPassword.value = "";
-      elements.authPassword.focus();
-    }
-    setTimeout(function resetFailedState() {
-      setAuthCardMode("");
-      setAuthStatus("AWAITING CREDENTIALS");
-    }, 280);
-  }, 360);
+    setTimeout(function enterFtpSession() {
+      setAuthOverlayVisible(false);
+      setTerminalConnected(true);
+      setFlowPhase(FLOW_PHASE.STREAMING);
+      startInvestigationMode();
+    }, 460);
+  }, 420);
 }
 
-/** 로그인 콘솔 표시/숨김. */
+/** 접근 동의 오버레이 표시/숨김. */
 function setAuthOverlayVisible(visible) {
   if (elements.authOverlay) {
     elements.authOverlay.classList.toggle("is-hidden", !visible);
   }
 }
 
-/** 로그인 콘솔 상태 텍스트 갱신. */
+/** 접근 동의 상태 텍스트 갱신. */
 function setAuthStatus(text) {
   if (elements.authStatus) {
     elements.authStatus.textContent = text || "";
   }
 }
 
-/** 로그인 카드 상태 클래스(is-connecting/is-success/is-error) 전환. */
+/** 접근 동의 카드 상태 클래스(is-connecting/is-success/is-error) 전환. */
 function setAuthCardMode(mode) {
   if (!elements.authForm) {
     return;
@@ -1850,13 +1884,10 @@ function setAuthCardMode(mode) {
   }
 }
 
-/** 로그인 입력필드/버튼 비활성화 제어. */
+/** 접근 동의 입력필드/버튼 비활성화 제어. */
 function setAuthFormEnabled(enabled) {
-  if (elements.authUsername) {
-    elements.authUsername.disabled = !enabled;
-  }
-  if (elements.authPassword) {
-    elements.authPassword.disabled = !enabled;
+  if (elements.authConsentText) {
+    elements.authConsentText.disabled = !enabled;
   }
   if (elements.authForm) {
     var submit = elements.authForm.querySelector(".auth-submit");
@@ -1872,9 +1903,9 @@ function setAuthFormEnabled(enabled) {
 function startInvestigationMode() {
   var introLines = [
     { text: buildRestoredStampLine(), tone: "log-restored" },
-    { text: "link ready: hyresis.local (ro)", tone: "log-success" },
-    { text: "session attached: observer", tone: "log-muted" },
-    { text: "recovery index online", tone: "log-muted" },
+    { text: "링크 연결: hyresis.local (읽기 전용)", tone: "log-success" },
+    { text: "세션 연결: observer", tone: "log-muted" },
+    { text: "복구 인덱스 준비 완료", tone: "log-muted" },
   ];
   var index = 0;
 
@@ -1955,7 +1986,7 @@ function setTerminalConnected(connected) {
 }
 
 function refreshTerminalSummaryText() {
-  var fallback = "no recent event";
+  var fallback = "최근 이벤트 없음";
   var summary = terminalSummaryLines.length > 0 ? terminalSummaryLines[terminalSummaryLines.length - 1] : fallback;
   if (elements.terminalSummaryText) {
     elements.terminalSummaryText.textContent = summary;
@@ -1986,13 +2017,13 @@ function buildTerminalSummaryCandidate(text, tone) {
     return null;
   }
 
-  if (safeText.indexOf("session attached: observer") === 0 || safeText.indexOf("link ready: hyresis.local") === 0) {
-    return { text: "session attached", key: "session-ready" };
+  if (safeText.indexOf("세션 연결: observer") === 0 || safeText.indexOf("링크 연결: hyresis.local") === 0) {
+    return { text: "세션 연결 완료", key: "session-ready" };
   }
   if (safeText.indexOf("cwd -> ") === 0) {
     return { text: "cwd changed", key: safeText };
   }
-  if (safeText.indexOf("repair digest: ") === 0) {
+  if (safeText.indexOf("복구 요약: ") === 0) {
     return { text: safeText, key: safeText };
   }
   if (safeText.indexOf("[PIPELINE] ") === 0) {
@@ -2002,17 +2033,17 @@ function buildTerminalSummaryCandidate(text, tone) {
     return { text: safeText.replace("[PIPELINE] ", ""), key: safeText };
   }
 
-  match = safeText.match(/^tag linked: (.+)$/);
+  match = safeText.match(/^조각 연결: (.+)$/);
   if (match) {
-    return { text: "tag linked: " + match[1], key: "tag:" + match[1] };
+    return { text: "조각 연결: " + match[1], key: "tag:" + match[1] };
   }
 
-  match = safeText.match(/^resolver compiled: (.+)$/);
+  match = safeText.match(/^조합 생성: (.+)$/);
   if (match) {
-    return { text: "resolver compiled", key: "recipe:" + match[1] };
+    return { text: "조합 생성", key: "recipe:" + match[1] };
   }
 
-  if (safeText.indexOf("transfer complete: ") === 0) {
+  if (safeText.indexOf("파일 수신 완료: ") === 0) {
     return { text: safeText, key: safeText };
   }
 
@@ -2460,11 +2491,7 @@ function renderRecoverablePreviewPrompt(fileName, requiredTag) {
   var currentQuestion = getBlock0CurrentQuestion();
   var questionText = currentQuestion ? String(currentQuestion.prompt || "") : "";
 
-  block0PendingRecoveryPrompt = {
-    fileName: safeFileName,
-    requiredTag: safeTag,
-    questionText: questionText,
-  };
+  armBlock0Recovery(safeFileName, safeTag, questionText);
 }
 
 /** PREVIEW BUFFER 로그 라인을 태그 링크 포함 형태로 렌더링한다. */
@@ -2538,7 +2565,7 @@ function buildInvestigationPanelViewModel(message) {
   if (!isStreaming) {
     return {
       mode: "detached",
-      pathText: "ftp://hyresis.local/ (login required)",
+      pathText: "ftp://hyresis.local/ (열람 동의 필요)",
       previewText: message || "로그인 후 파일 목록을 확인할 수 있습니다.",
     };
   }
@@ -2694,13 +2721,13 @@ function handleInvestigationItemClick(clickEvent) {
     markInvestigationRowLoading(target, false);
     if (recoveryState === "recoverable") {
       renderRecoverablePreviewPrompt(fileName, requiredTag);
-      logSuccess("repair target armed: " + fileName);
+      logSuccess("복구 대상 준비: " + fileName);
       renderBlock0Panel();
       renderInvestigationPanel();
       touchPuzzleActivity("block0");
       return;
     }
-    block0PendingRecoveryPrompt = null;
+    clearBlock0RecoveryArm();
     pinTextPreview(
       "[LOCK BLOCKED] " + fileName + "\nrequired restore: " + (requiredFile || "previous entry"),
     );
@@ -2710,7 +2737,7 @@ function handleInvestigationItemClick(clickEvent) {
   markInvestigationRowLoading(target, kind === "file");
 
   if (kind === "dir") {
-    block0PendingRecoveryPrompt = null;
+    clearBlock0RecoveryArm();
     if (normalizePath(path) === BLOCK1_SPEC.rootPath && state.block0MemoryUnlocked && !state.block1Started) {
       startBlock1FromMemory();
       return;
@@ -2720,7 +2747,7 @@ function handleInvestigationItemClick(clickEvent) {
   }
 
   if (kind === "file") {
-    block0PendingRecoveryPrompt = null;
+    clearBlock0RecoveryArm();
     readFile(path);
   }
 }
@@ -2792,7 +2819,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     "",
     []
   );
-  logSystem("transfer queued: " + (targetPath.split("/").pop() || targetPath));
+  logSystem("파일 수신 시작: " + (targetPath.split("/").pop() || targetPath));
 
   function tick() {
     var downloaded = 0;
@@ -2817,7 +2844,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     }
 
     if (step >= ticks) {
-      logSuccess("transfer complete: " + (targetPath.split("/").pop() || targetPath));
+      logSuccess("파일 수신 완료: " + (targetPath.split("/").pop() || targetPath));
       if (typeof done === "function") {
         done();
       }
@@ -2911,12 +2938,9 @@ function buildBlock0PanelViewModel() {
     clauseVisible: state[prefix + "ClauseVisible"],
     clauseGoalReady: state[prefix + "ClauseVisible"] && !state[prefix + "Completed"] && Boolean(currentAnswer) && collectedTags.indexOf(currentAnswer) !== -1,
     clauseCompleted: state[prefix + "Completed"],
-    purposeLabel: isBlock0 && block0AnswerRecoveryActive
-      ? "patch pipeline active..."
-      : (currentQuestion ? patchTarget.expressionText : (spec.title + " 복구 완료")),
+    purposeLabel: currentQuestion ? patchTarget.expressionText : (spec.title + " 복구 완료"),
     purposeValue: currentPurpose,
     purposeMatch: Boolean(currentPurpose) && Boolean(currentAnswer) && currentPurpose === currentAnswer,
-    premiseText: isBlock0 && block0AnswerRecoveryActive ? "hashline -> rebuild -> commit" : ("phase " + solvedCount + "/" + totalQuestions),
     fusion: {
       operator: block0FusionDraft.operator,
       slots: fusionSlots,
@@ -2936,6 +2960,7 @@ function renderBlock0Panel() {
     if (vm.action && vm.action.toneClass) {
       elements.block0ActionCard.classList.add(vm.action.toneClass);
     }
+    elements.block0ActionCard.classList.toggle("is-hidden", Boolean(vm.action && vm.action.isHidden));
   }
   if (elements.block0ActionState) {
     elements.block0ActionState.textContent = vm.action ? vm.action.stateLabel : "";
@@ -2945,31 +2970,26 @@ function renderBlock0Panel() {
   }
   if (elements.block0ActionBody) {
     elements.block0ActionBody.textContent = vm.action ? vm.action.body : "";
+    elements.block0ActionBody.classList.toggle("is-hidden", !(vm.action && vm.action.body));
   }
   if (elements.block0ActionButton) {
     elements.block0ActionButton.textContent = vm.action && vm.action.ctaLabel ? vm.action.ctaLabel : "";
     elements.block0ActionButton.dataset.action = vm.action && vm.action.ctaAction ? vm.action.ctaAction : "";
     elements.block0ActionButton.classList.toggle("is-hidden", !(vm.action && vm.action.ctaLabel));
   }
-  if (elements.block0ContextSession) {
-    elements.block0ContextSession.textContent = vm.action && vm.action.context ? vm.action.context.sessionState : "none";
+  if (elements.block0Progress) {
+    elements.block0Progress.classList.toggle("is-hidden", !(vm.action && vm.action.progressLabel));
   }
-  if (elements.block0ContextSource) {
-    elements.block0ContextSource.textContent = vm.action && vm.action.context ? vm.action.context.sourceFile : "none";
+  if (elements.block0ProgressFill) {
+    elements.block0ProgressFill.style.width = ((vm.action && vm.action.progressValue ? vm.action.progressValue : 0) * 100) + "%";
   }
-  if (elements.block0ContextTarget) {
-    elements.block0ContextTarget.textContent = vm.action && vm.action.context ? vm.action.context.targetFile : "none";
-  }
-  if (elements.block0ContextRequired) {
-    elements.block0ContextRequired.textContent = vm.action && vm.action.context ? vm.action.context.requiredTag : "none";
-  }
-  if (elements.block0ContextEvidence) {
-    elements.block0ContextEvidence.textContent = vm.action && vm.action.context ? vm.action.context.linkedEvidence : "none";
+  if (elements.block0ProgressLabel) {
+    elements.block0ProgressLabel.textContent = vm.action && vm.action.progressLabel ? vm.action.progressLabel : "";
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.innerHTML = "";
     if (vm.tags.length === 0) {
-      elements.block0TagInventory.textContent = "linked fragments: none";
+      elements.block0TagInventory.textContent = "획득한 조각이 없습니다.";
     } else {
       vm.tags.forEach(function renderTag(tagView) {
         var chip = document.createElement("button");
@@ -3007,7 +3027,7 @@ function renderBlock0Panel() {
     var fusion = vm.fusion;
     var slotHtml = fusion.slots.map(function toSlotHtml(slot) {
       var baseClass = "block0-tag-slot block0-fusion-slot";
-      var slotLabel = "arg-" + (slot.index + 1);
+      var slotLabel = "인자-" + (slot.index + 1);
       if (slot.value) {
         baseClass += " filled";
       } else if (slot.expecting) {
@@ -3020,13 +3040,13 @@ function renderBlock0Panel() {
         "</button>"
       );
     }).join("");
-    var operatorText = fusion.operator ? fusion.operator : "[mount operator]";
+    var operatorText = fusion.operator ? fusion.operator : "[연산자 조각 배치]";
     var operatorClass = "block0-tag-slot block0-fusion-slot operator" + (fusion.operator ? " filled" : " expecting");
     elements.block0FusionDock.innerHTML =
       '<div class="block0-fusion-help-row">' +
       '<div class="block0-fusion-help-wrap">' +
       '<button type="button" class="block0-fusion-help" aria-label="조합 안내">?</button>' +
-      '<div class="block0-fusion-tooltip" role="tooltip">mount an operator first, then bind compatible args. the resolver emits a new fragment when the signature closes.</div>' +
+      '<div class="block0-fusion-tooltip" role="tooltip">연산자 조각을 먼저 놓고, 맞는 조각을 순서대로 채우면 결과 조각이 생성됩니다.</div>' +
       "</div>" +
       "</div>" +
       '<div class="block0-fusion-slots">' +
@@ -3054,7 +3074,7 @@ function renderBlock0Panel() {
   if (elements.block0PurposeSlot) {
     elements.block0PurposeSlot.disabled = block0AnswerRecoveryActive;
     if (!vm.purposeValue) {
-      elements.block0PurposeSlot.textContent = "[bind fragment]";
+      elements.block0PurposeSlot.textContent = "[태그를 드롭]";
       elements.block0PurposeSlot.classList.remove("filled");
       elements.block0PurposeSlot.classList.remove("mismatch");
       elements.block0PurposeSlot.classList.add("expecting");
@@ -3064,9 +3084,6 @@ function renderBlock0Panel() {
       elements.block0PurposeSlot.classList.remove("expecting");
       elements.block0PurposeSlot.classList.toggle("mismatch", !vm.purposeMatch);
     }
-  }
-  if (elements.block0PremiseSlot) {
-    elements.block0PremiseSlot.textContent = vm.premiseText;
   }
 }
 
@@ -3080,7 +3097,7 @@ function setBlock0MemoryModalVisible(visible) {
   }
   if (elements.block0MemoryModalNext) {
     elements.block0MemoryModalNext.disabled = state.block1Started;
-    elements.block0MemoryModalNext.textContent = state.block1Started ? "archive mounted" : "mount next archive";
+    elements.block0MemoryModalNext.textContent = state.block1Started ? "다음 복구 진행 중" : "다음 복구 열기";
   }
 }
 
@@ -3146,6 +3163,7 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
       return;
     }
     block0AnswerRecoveryActive = false;
+    setBlock0PipelineStage("", 0);
     syncInvestigationReadOnlyState();
     renderBlock0Panel();
     if (typeof done === "function") {
@@ -3155,6 +3173,7 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
 
   block0AnswerRecoveryJob = jobId;
   block0AnswerRecoveryActive = true;
+  setBlock0PipelineStage("무결성 검사", 0.2);
   syncInvestigationReadOnlyState();
   renderBlock0Panel();
   renderInvestigationPanel();
@@ -3163,18 +3182,24 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
     }
+    setBlock0PipelineStage("무결성 검사", 0.34);
+    renderBlock0Panel();
   }, 240);
 
   scheduleBlockLifecycleTimer(function runRuleCheck() {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
     }
+    setBlock0PipelineStage("규칙 충돌 검사", 0.68);
+    renderBlock0Panel();
   }, 920);
 
   scheduleBlockLifecycleTimer(function runRebuild() {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
     }
+    setBlock0PipelineStage("패치 반영", 1);
+    renderBlock0Panel();
     if (recoverFile) {
       unlockBlock0File(recoverFile, "패치 재조립: " + recoverFile);
     } else {
@@ -3196,7 +3221,7 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
   setBlock0ContextTag(tagToCollect);
   if (isNewTag) {
     collectedTags.push(tagToCollect);
-    logSuccess("tag linked: " + tagToCollect);
+    logSuccess("조각 연결: " + tagToCollect);
   }
 
   if (!isNewTag) {
@@ -3247,7 +3272,7 @@ function applyBlock0SynthesisResult(synthesisResult) {
   }
   if (synthesisResult.recipeText && state[prefix + "DiscoveredRecipes"].indexOf(synthesisResult.recipeText) === -1) {
     state[prefix + "DiscoveredRecipes"].push(synthesisResult.recipeText);
-    logSuccess("resolver compiled: " + synthesisResult.recipeText);
+    logSuccess("조합 생성: " + synthesisResult.recipeText);
   }
   collectBlock0Tag(synthesisResult.resultTag, synthesisResult.resultTag, prefix);
   renderBlock0Panel();
@@ -3504,7 +3529,11 @@ function handleBlock0PurposeSlotDrop(dragEvent) {
     }
   }
 
-  state[prefix + "PurposeValue"] = droppedTag;
+  if (prefix === "block0") {
+    setBlock0Purpose(droppedTag);
+  } else {
+    state[prefix + "PurposeValue"] = droppedTag;
+  }
   renderBlock0Panel();
   touchPuzzleActivity(prefix);
   if (currentQuestion && expectedAnswer && state[prefix + "PurposeValue"] === expectedAnswer) {
@@ -3559,11 +3588,8 @@ function activatePendingRecoveryPrompt() {
   }
 
   pendingFile = String(block0PendingRecoveryPrompt.fileName || "");
-  block0ActiveRecoveryFile = pendingFile;
-  state.block0ClauseVisible = true;
-  state.block0PurposeValue = "";
-  block0PendingRecoveryPrompt = null;
-  logSuccess("clause mounted: " + pendingFile);
+  mountBlock0Clause();
+  logSuccess("복구 식 연결: " + pendingFile);
   renderBlock0Panel();
   renderInvestigationPanel();
   pulseBlock0Clause("is-goal-alert");
@@ -3610,7 +3636,11 @@ function handleBlock0PurposeSlotClick() {
     return;
   }
 
-  state[prefix + "PurposeValue"] = "";
+  if (prefix === "block0") {
+    clearBlock0Purpose();
+  } else {
+    state[prefix + "PurposeValue"] = "";
+  }
   if (elements.block0PurposeSlot) {
     elements.block0PurposeSlot.classList.remove("is-drop-hover");
   }
@@ -3640,7 +3670,7 @@ function handleBlock0ExecuteClick() {
 
   if (prefix === "block1") {
     state.block1SolvedAnswers.push(expectedAnswer);
-    logSuccess("patch committed: " + currentQuestion.id);
+    logSuccess("패치 반영: " + currentQuestion.id);
     if (state.block1QuestionIndex < questions.length - 1) {
       state.block1QuestionIndex += 1;
       state.block1PurposeValue = "";
@@ -3656,21 +3686,14 @@ function handleBlock0ExecuteClick() {
   }
 
   runBlock0AnswerRecoveryPipeline(currentQuestion, function onAnswerRecovered() {
-    state.block0SolvedAnswers.push(expectedAnswer);
-    logSuccess("patch committed: " + currentQuestion.id);
+    commitBlock0Answer(expectedAnswer);
+    logSuccess("패치 반영: " + currentQuestion.id);
 
     if (state.block0QuestionIndex < questions.length - 1) {
       var nextTargetFile = "";
-      state.block0QuestionIndex += 1;
-      state.block0PurposeValue = "";
-      block0ActiveRecoveryFile = "";
-      nextTargetFile = getBlock0CurrentTargetFileName();
-      if (nextTargetFile) {
-        state.block0ClauseVisible = false;
-      } else {
-        state.block0ClauseVisible = true;
-        block0ActiveRecoveryFile = "최종 복구식";
-      }
+      var nextSequenceFile = getBlock0UnlockSequenceFiles()[state.block0QuestionIndex + 1] || "";
+      nextTargetFile = String(nextSequenceFile || "");
+      advanceBlock0Question(Boolean(nextTargetFile));
       pulseBlock0Clause("is-goal-clear");
       renderBlock0Panel();
       renderInvestigationPanel();
@@ -3704,7 +3727,7 @@ function completeBlock1ClauseIfReady() {
   state.block1Completed = true;
   state.block1Integrity = Math.max(state.block1Integrity, 36);
   logRestored(buildRestoredStampLine());
-  logSuccess("archive resolved: block-1");
+  logSuccess("복구 완료: block-1");
   BLOCK1_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
@@ -3728,9 +3751,7 @@ function completeBlock0ClauseIfReady() {
     return;
   }
 
-  state.block0Completed = true;
-  state.block0MemoryUnlocked = true;
-  state.block0Integrity = Math.max(state.block0Integrity, 35);
+  completeBlock0Clause();
 
   logRestored(buildRestoredStampLine());
   logSuccess(lifecycle.completeSuccessLog || "archive resolved: block-0");
@@ -3738,7 +3759,7 @@ function completeBlock0ClauseIfReady() {
   BLOCK0_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
-  logSystem("memory segment mounted: " + BLOCK0_SPEC.memory.text);
+  logSystem("기억 조각 연결: " + BLOCK0_SPEC.memory.text);
   syncBlock0Fs();
   renderInvestigationPanel();
   if (block0Lifecycle) {
