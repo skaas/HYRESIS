@@ -48,7 +48,7 @@ var block0CurrentContext = {
   file: "",
   tag: "",
 };
-var DEFAULT_PREVIEW_HINT = "인덱스에서 파일을 열어 조각 추출 대상을 확인하세요.";
+var DEFAULT_PREVIEW_HINT = "파일을 열면 원문과 복구 증거가 표시됩니다.";
 var EMPTY_RECIPE_HINT = "아직 기록된 조합이 없습니다.";
 var SHELL_NARRATIVE_ONLY = true;
 var block0Lifecycle = null;
@@ -66,6 +66,7 @@ var block1RecoveryRootMeta = null;
 var block0PendingRecoveryPrompt = null;
 var block0ActiveRecoveryFile = "";
 var block1ActiveRecoveryFile = "";
+var pinnedInvestigationPreview = null;
 
 /** 템플릿 문자열의 {token}을 값으로 치환한다. */
 function formatLifecycleText(template, params) {
@@ -250,6 +251,15 @@ function getPuzzleCurrentQuestion(prefix) {
   return questions[state[prefix + "QuestionIndex"]] || null;
 }
 
+function getPuzzlePreviousQuestion(prefix) {
+  var questions = getPuzzleQuestions(prefix);
+  var index = Number(state[prefix + "QuestionIndex"] || 0) - 1;
+  if (index < 0 || index >= questions.length) {
+    return null;
+  }
+  return questions[index] || null;
+}
+
 function getPuzzleCurrentRecoveryFile(prefix) {
   return prefix === "block1" ? block1ActiveRecoveryFile : block0ActiveRecoveryFile;
 }
@@ -388,7 +398,7 @@ function escapeHtml(text) {
 function buildBlock0HintPanelHtml() {
   if (getActivePuzzlePrefix() === "block1") {
     if (state.block1DiscoveredRecipes.length === 0 && state.block1SolvedAnswers.length === 0) {
-      return '<div class="hint-empty">block-1 로그를 열어 태그를 수집하고, 필요한 경우 조합한 뒤 답을 슬롯에 넣으세요.</div>';
+      return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
     }
     return (
       '<div class="hint-section">' +
@@ -455,17 +465,17 @@ function buildBlock0HintPanelHtml() {
   }
 
   if (recipeLines.length === 0 && interpretationLines.length === 0) {
-    return '<div class="hint-empty">아직 수집된 복구 힌트가 없습니다.</div>';
+    return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
   }
 
   return (
     '<div class="hint-section">' +
-    '<div class="hint-section-title">합성 방법</div>' +
-    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">합성 기록이 생기면 색상 힌트와 조합 방식이 표시됩니다.</div>') +
+    '<div class="hint-section-title">합성 기록</div>' +
+    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">합성 기록이 생기면 여기에 남습니다.</div>') +
     "</div>" +
     '<div class="hint-section">' +
-    '<div class="hint-section-title">자연어 해석</div>' +
-    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">복구가 진행되면 현재까지의 의미가 자연어로 정리됩니다.</div>') +
+    '<div class="hint-section-title">해석 기록</div>' +
+    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">복구가 진행되면 현재까지의 의미가 정리됩니다.</div>') +
     "</div>"
   );
 }
@@ -473,18 +483,241 @@ function buildBlock0HintPanelHtml() {
 function getBlock0StageHintText() {
   var question = getBlock0CurrentQuestion();
   if (!question) {
-    return "[HINT] 누락 구간 분석 대기";
+    return "현재 복구 단계의 증거를 다시 확인하세요.";
   }
   if (question.id === "Q0-2") {
-    return "[HINT] 대상이 인간이면 비해침 대상도 인간으로 맞춰야 합니다.";
+    return "대상이 인간이면 비해침 대상도 인간으로 맞춰야 합니다.";
   }
   if (question.id === "Q0-3") {
-    return "[HINT] 설계식에서 필수보존(비해침) 형태를 복원하세요.";
+    return "설계식에서 필수보존(비해침) 형태를 복원하세요.";
   }
   if (question.id === "Q0-4") {
-    return "[HINT] 앞 단계 결과를 재사용해 최종 누락 식을 패치하세요.";
+    return "앞 단계 결과를 재사용해 최종 누락 식을 패치하세요.";
   }
-  return "[HINT] 누락 구간 분석 대기";
+  return "현재 복구 단계의 증거를 다시 확인하세요.";
+}
+
+function clearPuzzleIdleHint() {
+  var hadIdleHint = state.block0IdleHintActive || state.block1IdleHintActive;
+  state.block0IdleHintActive = false;
+  state.block1IdleHintActive = false;
+  if (state.block0IdleHintTimer) {
+    clearTimeout(state.block0IdleHintTimer);
+    state.block0IdleHintTimer = 0;
+  }
+  return hadIdleHint;
+}
+
+function touchPuzzleActivity(prefix) {
+  var activePrefix = prefix || getActivePuzzlePrefix();
+  var hadIdleHint = clearPuzzleIdleHint();
+  if (state[activePrefix + "Completed"] || state.phase !== FLOW_PHASE.STREAMING) {
+    if (hadIdleHint) {
+      renderBlock0Panel();
+    }
+    return;
+  }
+
+  state.block0IdleHintTimer = setTimeout(function onPuzzleIdleHint() {
+    if (state.phase !== FLOW_PHASE.STREAMING || state[activePrefix + "Completed"]) {
+      return;
+    }
+    state.block0IdleHintActive = activePrefix === "block0";
+    state.block1IdleHintActive = activePrefix === "block1";
+    renderBlock0Panel();
+  }, BLOCK0_SPEC.hintDelayMs);
+
+  if (hadIdleHint) {
+    renderBlock0Panel();
+  }
+}
+
+function getQuestionUiText(question, key) {
+  if (!question || typeof question[key] !== "string") {
+    return "";
+  }
+  return String(question[key] || "").trim();
+}
+
+function hasOpenPuzzlePreview(prefix) {
+  var fileIndex = getPuzzleFileIndex(prefix);
+  return Boolean(previewFilePath) && Boolean(fileIndex[previewFilePath]) && previewFileLines.length > 0;
+}
+
+function buildWorkbenchActionViewModel(prefix) {
+  var spec = getPuzzleSpec(prefix);
+  var currentQuestion = getPuzzleCurrentQuestion(prefix);
+  var previousQuestion = getPuzzlePreviousQuestion(prefix);
+  var currentAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
+  var currentPurpose = state[prefix + "PurposeValue"] || "";
+  var collectedTags = state[prefix + "CollectedTags"];
+  var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
+  var hasOpenPreview = hasOpenPuzzlePreview(prefix);
+  var isIdleHintActive = Boolean(state[prefix + "IdleHintActive"]);
+  var questionTitle = activeRecoveryFile ? (activeRecoveryFile + " 복구") : ((spec.title || "복구 단계") + " 진행");
+  var questionActionText = getQuestionUiText(currentQuestion, "actionText");
+  var idleActionText = getQuestionUiText(currentQuestion, "idleText");
+  var resolvedActionText = getQuestionUiText(previousQuestion, "resolvedText");
+  var block0TargetFile = getBlock0CurrentTargetFileName();
+  var block0Rule = getBlock0UnlockRuleByFile(block0TargetFile);
+  var block0Requirement = block0Rule ? String(block0Rule.whenTag || "") : "";
+  var block0TargetReady = prefix === "block0" ? isBlock0UnlockRuleSatisfied(block0TargetFile) : false;
+
+  if (state.phase !== FLOW_PHASE.STREAMING) {
+    return {
+      toneClass: "",
+      stateLabel: "OFFLINE",
+      title: "세션 대기",
+      body: "로그인 후 복구 인덱스와 현재 단계가 여기에 표시됩니다.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (block0AnswerRecoveryActive) {
+    return {
+      toneClass: "is-processing",
+      stateLabel: "PROCESSING",
+      title: "패치 검증 중",
+      body: "무결성 검사와 인덱스 갱신이 끝날 때까지 작업대가 잠깁니다.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (prefix === "block0" && block0PendingRecoveryPrompt) {
+    var pendingTag = block0PendingRecoveryPrompt.requiredTag || "조건 확인 필요";
+    var pendingQuestion = block0PendingRecoveryPrompt.questionText || "질문 정보를 불러오는 중입니다.";
+    return {
+      toneClass: "is-ready",
+      stateLabel: "READY",
+      title: block0PendingRecoveryPrompt.fileName + " 복구 시작",
+      body:
+        "문제: " + pendingQuestion + " 준비 태그: " + pendingTag +
+        ". PREVIEW에는 방금 읽은 증거가 유지됩니다. 작업대에서 복구를 시작하세요.",
+      ctaLabel: "복구 시작",
+      ctaAction: "start-recovery",
+    };
+  }
+
+  if (prefix === "block0" && state.block0MemoryUnlocked && !state.block1Started) {
+    return {
+      toneClass: "is-resolved",
+      stateLabel: "NEXT",
+      title: "다음 복구 준비 완료",
+      body: "기억 조각을 확인한 뒤 block-1 폴더로 이동해 다음 복구를 이어가세요.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (prefix === "block1" && state.block1Started && !state.block1Completed && state.block1VisibleFiles.length === 0) {
+    return {
+      toneClass: "is-processing",
+      stateLabel: "SYNC",
+      title: "block-1 인덱스 동기화 중",
+      body: "새 파일이 열리면 여기서 다음 행동을 안내합니다.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (state[prefix + "Completed"]) {
+    return {
+      toneClass: "is-resolved",
+      stateLabel: "RESOLVED",
+      title: (spec.title || "복구 단계") + " 완료",
+      body: "로그에는 결과만 남기고, 다음 단계 증거는 PREVIEW와 인덱스에서 이어집니다.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (!state[prefix + "ClauseVisible"]) {
+    if (prefix === "block0" && block0TargetReady) {
+      return {
+        toneClass: "is-ready",
+        stateLabel: "SELECT",
+        title: "다음 복구 파일 선택",
+        body: resolvedActionText || ((block0TargetFile || "다음 파일") + "을 선택해 다음 복구 문제를 여세요."),
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    if (prefix === "block0" && hasOpenPreview) {
+      return {
+        toneClass: "",
+        stateLabel: "ACTION",
+        title: "잠금 조건 맞추기",
+        body: (block0Requirement ? (block0Requirement + " 태그를 확보해 잠금 조건을 만족시키세요.") : "PREVIEW의 후보 태그를 눌러 잠금 조건을 만족시키세요."),
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    return {
+      toneClass: "",
+      stateLabel: "ACTION",
+      title: "증거 파일 열기",
+      body: prefix === "block0" ? "부팅.log를 열어 첫 조각과 잠금 조건을 확인하세요." : "새로 열린 파일을 열어 복구를 이어가세요.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (!currentQuestion) {
+    return {
+      toneClass: "",
+      stateLabel: "ACTION",
+      title: "현재 단계 확인",
+      body: "복구에 필요한 증거와 조각을 다시 확인하세요.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (currentPurpose && currentAnswer && currentPurpose !== currentAnswer) {
+    return {
+      toneClass: "is-warning",
+      stateLabel: "RETRY",
+      title: "다른 조각으로 다시 시도",
+      body: "현재 슬롯의 " + currentPurpose + "는 문제와 맞지 않습니다. PREVIEW의 증거를 다시 보고 조각을 바꿔 보세요.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (prefix === "block1" && !hasOpenPreview && state.block1VisibleFiles.length > 0 && collectedTags.length === 0) {
+    return {
+      toneClass: "",
+      stateLabel: "ACTION",
+      title: "열린 로그 확인",
+      body: "새로 열린 로그를 읽고 필요한 조각을 수집하세요.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (!currentPurpose && currentAnswer && collectedTags.indexOf(currentAnswer) !== -1) {
+    return {
+      toneClass: "is-ready",
+      stateLabel: "READY",
+      title: questionTitle,
+      body: "필요한 조각을 이미 확보했습니다. 슬롯에 넣으면 즉시 검증이 진행됩니다.",
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  return {
+    toneClass: isIdleHintActive ? "is-ready" : "",
+    stateLabel: isIdleHintActive ? "HINT" : "ACTION",
+    title: questionTitle,
+    body:
+      (isIdleHintActive ? idleActionText : questionActionText) ||
+      (isIdleHintActive ? getBlock0StageHintText() : "PREVIEW의 증거를 읽고 필요한 조각을 수집하거나 조합한 뒤 슬롯에 넣으세요."),
+    ctaLabel: "",
+    ctaAction: "",
+  };
 }
 
 function resetBlock0FusionDraft() {
@@ -1004,6 +1237,7 @@ function setupBlockLifecycles() {
       state.block0SolvedAnswers = [];
       state.block0MemoryUnlocked = false;
       state.block0DragHintShown = false;
+      state.block0IdleHintActive = false;
       state.block0DiscoveredRecipes = [];
       block0RecoveryMetaByFile = {};
       block0RecoveryRootMeta = null;
@@ -1020,7 +1254,7 @@ function setupBlockLifecycles() {
           appendLogLine(String(entry.text || ""), entry.tone || "log-muted");
         });
       }
-      touchBlock0Activity();
+      touchPuzzleActivity("block0");
     },
     onTagCollected: function onBlock0TagCollectedLifecycle(spec, tagToCollect) {
       void spec;
@@ -1039,6 +1273,7 @@ function setupBlockLifecycles() {
       state.block1PurposeValue = "";
       state.block1QuestionIndex = 0;
       state.block1SolvedAnswers = [];
+      state.block1IdleHintActive = false;
       state.block1DiscoveredRecipes = [];
       block1RecoveryMetaByFile = {};
       block1RecoveryRootMeta = null;
@@ -1058,6 +1293,7 @@ function setupBlockLifecycles() {
       state.block1PurposeValue = "";
       state.block1QuestionIndex = 0;
       state.block1SolvedAnswers = [];
+      state.block1IdleHintActive = false;
       state.block1DiscoveredRecipes = [];
       block1ActiveRecoveryFile = "";
       syncBlock1Fs();
@@ -1084,10 +1320,8 @@ function setupBlockLifecycles() {
           prependRecoveredFile(state.block1VisibleFiles, targetName);
           syncBlock1Fs();
           renderInvestigationPanel(formatLifecycleText(unlockSpec.panelMessageTemplate || "", { file: targetName }));
+          renderBlock0Panel();
           logRecoveryEvent(formatLifecycleText(unlockSpec.logTemplate || "", { file: targetName }), unlockSpec.tone || "log-muted");
-          if (unlockSpec.followupLog) {
-            logSystem(unlockSpec.followupLog);
-          }
         }, Math.max(0, Number(unlockSpec.delayMs) || 0));
         blockLifecycleTimers.push(timer);
       });
@@ -1122,6 +1356,7 @@ function setupBlockLifecycles() {
       prependRecoveredFile(state.block1VisibleFiles, nextName);
       syncBlock1Fs();
       renderInvestigationPanel(formatLifecycleText(onOpenUnlock.panelMessageTemplate || "", { file: nextName }));
+      renderBlock0Panel();
       logRecoveryEvent(formatLifecycleText(onOpenUnlock.logTemplate || "", { file: nextName }), onOpenUnlock.tone || "log-muted");
     },
   });
@@ -1184,6 +1419,8 @@ function resetBlock0State() {
   block0ActiveRecoveryFile = "";
   block0DraggedTag = "";
   block0DraggedTagIndex = -1;
+  pinnedInvestigationPreview = null;
+  clearPuzzleIdleHint();
   syncInvestigationReadOnlyState();
   block0Lifecycle.reset();
   block1Lifecycle.reset();
@@ -1288,6 +1525,11 @@ function cacheElements() {
   elements.investigationList = document.getElementById("investigation-list");
   elements.investigationContent = document.getElementById("investigation-content");
   elements.block0Status = document.getElementById("block0-status");
+  elements.block0ActionCard = document.getElementById("block0-action-card");
+  elements.block0ActionState = document.getElementById("block0-action-state");
+  elements.block0ActionTitle = document.getElementById("block0-action-title");
+  elements.block0ActionBody = document.getElementById("block0-action-body");
+  elements.block0ActionButton = document.getElementById("block0-action-button");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
   elements.block0FusionDock = document.getElementById("block0-fusion-dock");
   elements.block0RecipeList = document.getElementById("block0-recipe-list");
@@ -1315,6 +1557,9 @@ function bindInputEvents() {
     elements.block0PurposeSlot.addEventListener("click", handleBlock0PurposeSlotClick);
     elements.block0PurposeSlot.addEventListener("dragover", handleBlock0PurposeSlotDragOver);
     elements.block0PurposeSlot.addEventListener("drop", handleBlock0PurposeSlotDrop);
+  }
+  if (elements.block0ActionButton) {
+    elements.block0ActionButton.addEventListener("click", handleWorkbenchActionButtonClick);
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.addEventListener("dragstart", handleBlock0InventoryDragStart);
@@ -1599,10 +1844,10 @@ function startInvestigationMode() {
   function streamNextIntroLine() {
     var line = introLines[index];
     if (!line) {
-      logWarn("세션 준비 완료: 연결 파일에서 조각을 추출해 누락 구간을 패치하세요.");
       state.investigationBooting = false;
       setInputEnabled(false);
-      touchBlock0Activity();
+      touchPuzzleActivity("block0");
+      renderBlock0Panel();
       return;
     }
 
@@ -1688,10 +1933,7 @@ function buildTerminalSummaryCandidate(text, tone) {
     safeText.indexOf("-- VIEW-ONLY --") === 0 ||
     safeText.indexOf("-- READ-ONLY --") === 0 ||
     safeText.indexOf("조작 안내:") === 0 ||
-    safeText.indexOf("[안내]") === 0 ||
-    safeText.indexOf("조합 시작:") === 0 ||
-    safeText.indexOf("조각 조합 기록 완료:") === 0 ||
-    safeText.indexOf("태그 확인 [") === 0
+    safeText.indexOf("[안내]") === 0
   ) {
     return null;
   }
@@ -2110,6 +2352,7 @@ function setInvestigationPreview(text, path, lines) {
   var linkedPrefix = getPuzzlePrefixForPath(path);
   var fileIndex = getPuzzleFileIndex(linkedPrefix);
   var hasLinkedContent = false;
+  pinnedInvestigationPreview = null;
   previewFilePath = path || "";
   previewFileLines = Array.isArray(lines) ? lines.slice() : [];
   hasLinkedContent =
@@ -2124,53 +2367,40 @@ function setInvestigationPreview(text, path, lines) {
   }
 }
 
-/** 복구 가능 잠금 파일 선택 시 PREVIEW에 문제 불러오기 액션을 렌더링한다. */
+function renderPinnedInvestigationPreview() {
+  var preview = pinnedInvestigationPreview;
+
+  if (!preview || !elements.investigationContent) {
+    return false;
+  }
+
+  previewFilePath = "";
+  previewFileLines = [];
+  elements.investigationContent.textContent = preview.text || DEFAULT_PREVIEW_HINT;
+  return true;
+}
+
+function pinTextPreview(text) {
+  pinnedInvestigationPreview = {
+    type: "text",
+    cwd: normalizePath(state.investigationCwd || ""),
+    text: text || DEFAULT_PREVIEW_HINT,
+  };
+  renderPinnedInvestigationPreview();
+}
+
+/** 복구 가능 잠금 파일 선택 시 WORKBENCH에 표시할 문제/조건만 보관한다. */
 function renderRecoverablePreviewPrompt(fileName, requiredTag) {
   var safeFileName = String(fileName || "대상 파일");
   var safeTag = String(requiredTag || "");
   var currentQuestion = getBlock0CurrentQuestion();
   var questionText = currentQuestion ? String(currentQuestion.prompt || "") : "";
-  var line1 = null;
-  var line2 = null;
-  var line3 = null;
-  var button = null;
 
   block0PendingRecoveryPrompt = {
     fileName: safeFileName,
     requiredTag: safeTag,
     questionText: questionText,
   };
-  previewFilePath = "";
-  previewFileLines = [];
-
-  if (!elements.investigationContent) {
-    return;
-  }
-
-  elements.investigationContent.innerHTML = "";
-
-  line1 = document.createElement("div");
-  line1.className = "preview-recovery-note";
-  line1.textContent = "[LOCK READY] " + safeFileName;
-  elements.investigationContent.appendChild(line1);
-
-  line2 = document.createElement("div");
-  line2.className = "preview-recovery-note";
-  line2.textContent = "준비 조건 태그: " + (safeTag || "조건 확인 필요");
-  elements.investigationContent.appendChild(line2);
-
-  line3 = document.createElement("div");
-  line3.className = "preview-recovery-note";
-  line3.textContent = questionText ? ("문제: " + questionText) : "문제: 현재 복구 문제를 불러오세요.";
-  elements.investigationContent.appendChild(line3);
-
-  button = document.createElement("button");
-  button.type = "button";
-  button.className = "preview-recovery-action";
-  button.dataset.fileName = safeFileName;
-  button.dataset.requiredTag = safeTag;
-  button.textContent = "복구 문제 불러오기";
-  elements.investigationContent.appendChild(button);
 }
 
 /** PREVIEW BUFFER 로그 라인을 태그 링크 포함 형태로 렌더링한다. */
@@ -2317,10 +2547,6 @@ function renderInvestigationPanel(message) {
     index += 1;
   }
 
-  if (vm.previewMessage) {
-    setInvestigationPreview(vm.previewMessage, previewFilePath, previewFileLines);
-    return;
-  }
   previewParentPath = previewFilePath ? normalizePath(previewFilePath + "/..") : "";
   shouldPreservePreview =
     Boolean(previewFilePath) &&
@@ -2328,6 +2554,10 @@ function renderInvestigationPanel(message) {
     previewParentPath === normalizePath(state.investigationCwd || "");
   if (shouldPreservePreview) {
     setInvestigationPreview(previewFileLines.join("\n"), previewFilePath, previewFileLines);
+    return;
+  }
+  if (pinnedInvestigationPreview && pinnedInvestigationPreview.cwd === normalizePath(state.investigationCwd || "")) {
+    renderPinnedInvestigationPreview();
     return;
   }
   setInvestigationPreview(DEFAULT_PREVIEW_HINT, "", []);
@@ -2400,16 +2630,15 @@ function handleInvestigationItemClick(clickEvent) {
     markInvestigationRowLoading(target, false);
     if (recoveryState === "recoverable") {
       renderRecoverablePreviewPrompt(fileName, requiredTag);
-      logSystem("복구 가능 파일 선택: " + fileName + " · PREVIEW에서 문제를 불러오세요.");
+      renderBlock0Panel();
+      touchPuzzleActivity("block0");
       return;
     }
     block0PendingRecoveryPrompt = null;
-    setInvestigationPreview(
+    pinTextPreview(
       "[LOCK BLOCKED] " + fileName + "\n선행 복구가 필요합니다.\n먼저 복구: " + (requiredFile || "이전 단계 파일"),
-      "",
-      []
     );
-    logWarn("복구 불가: 선행 파일 복구 후 다시 시도하세요.");
+    renderBlock0Panel();
     return;
   }
   markInvestigationRowLoading(target, kind === "file");
@@ -2559,17 +2788,7 @@ function readFile(path) {
 
 /** 플레이어 활동 발생 시 idle 힌트 타이머를 갱신한다. */
 function touchBlock0Activity() {
-  if (state.block0Completed) {
-    return;
-  }
-  if (state.block0IdleHintTimer) {
-    clearTimeout(state.block0IdleHintTimer);
-  }
-  state.block0IdleHintTimer = setTimeout(function onBlock0IdleHint() {
-    if (!state.block0Completed && state.phase === FLOW_PHASE.STREAMING) {
-      logSystem(getBlock0StageHintText());
-    }
-  }, BLOCK0_SPEC.hintDelayMs);
+  touchPuzzleActivity("block0");
 }
 
 /** 블록 0 패널 상태(무결성/태그 수/슬롯/기억카드)를 렌더링한다. */
@@ -2613,10 +2832,12 @@ function buildBlock0PanelViewModel() {
   var isBlock0 = prefix === "block0";
   var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var blockTitle = spec.title || (isBlock0 ? "복구 블록 0" : "복구 블록");
+  var action = buildWorkbenchActionViewModel(prefix);
   return {
     statusText:
       blockTitle + " · 무결성 " + state[prefix + "Integrity"] + "% · 태그 " + collectedTags.length + "개" +
       (isBlock0 && block0AnswerRecoveryActive ? " · 복구 연산 중" : ""),
+    action: action,
     tags: tags,
     recipeHtml: buildBlock0HintPanelHtml(),
     clauseTitle: (((spec.clause || {}).title || spec.title || "복구 대상")) + (activeRecoveryFile ? (" · " + activeRecoveryFile) : ""),
@@ -2643,6 +2864,26 @@ function renderBlock0Panel() {
 
   if (elements.block0Status) {
     elements.block0Status.textContent = vm.statusText;
+  }
+  if (elements.block0ActionCard) {
+    elements.block0ActionCard.classList.remove("is-ready", "is-processing", "is-warning", "is-resolved");
+    if (vm.action && vm.action.toneClass) {
+      elements.block0ActionCard.classList.add(vm.action.toneClass);
+    }
+  }
+  if (elements.block0ActionState) {
+    elements.block0ActionState.textContent = vm.action ? vm.action.stateLabel : "";
+  }
+  if (elements.block0ActionTitle) {
+    elements.block0ActionTitle.textContent = vm.action ? vm.action.title : "";
+  }
+  if (elements.block0ActionBody) {
+    elements.block0ActionBody.textContent = vm.action ? vm.action.body : "";
+  }
+  if (elements.block0ActionButton) {
+    elements.block0ActionButton.textContent = vm.action && vm.action.ctaLabel ? vm.action.ctaLabel : "";
+    elements.block0ActionButton.dataset.action = vm.action && vm.action.ctaAction ? vm.action.ctaAction : "";
+    elements.block0ActionButton.classList.toggle("is-hidden", !(vm.action && vm.action.ctaLabel));
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.innerHTML = "";
@@ -2701,7 +2942,10 @@ function renderBlock0Panel() {
     var operatorClass = "block0-tag-slot block0-fusion-slot operator" + (fusion.operator ? " filled" : " expecting");
     elements.block0FusionDock.innerHTML =
       '<div class="block0-fusion-help-row">' +
-      '<span class="block0-fusion-help" title="연산자 조각을 먼저 놓고 필요한 조각을 채우면 조합 결과가 생성됩니다." aria-label="조합 안내">?</span>' +
+      '<div class="block0-fusion-help-wrap">' +
+      '<button type="button" class="block0-fusion-help" aria-label="조합 안내">?</button>' +
+      '<div class="block0-fusion-tooltip" role="tooltip">연산자 조각을 먼저 놓고 필요한 조각을 채우면 조합 결과가 생성됩니다.</div>' +
+      "</div>" +
       "</div>" +
       '<div class="block0-fusion-slots">' +
       '<button type="button" class="' + operatorClass + '" data-role="operator">' + operatorText + "</button>" +
@@ -2782,13 +3026,14 @@ function pulseBlock0Clause(className) {
 function unlockBlock0File(fileName, panelMessage, logText, tone) {
   var detailLog = String(logText || "").trim();
   var detailTone = tone || "log-success";
+  void panelMessage;
   if (state.block0VisibleFiles.indexOf(fileName) !== -1) {
     return;
   }
   stampBlock0RecoveredFile(fileName);
   prependRecoveredFile(state.block0VisibleFiles, fileName);
   syncBlock0Fs();
-  renderInvestigationPanel(panelMessage || "색인 복구 +1");
+  renderInvestigationPanel();
   if (detailLog) {
     logRecoveryEvent(detailLog, detailTone);
   } else {
@@ -2830,22 +3075,18 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
   block0AnswerRecoveryActive = true;
   syncInvestigationReadOnlyState();
   renderBlock0Panel();
-
-  logRecoveryEvent("[PATCH] 검증 파이프라인 시작: " + questionId, "log-muted");
-  renderInvestigationPanel("패치 파이프라인 큐 등록: " + questionId);
+  renderInvestigationPanel();
 
   scheduleBlockLifecycleTimer(function runHashlineCheck() {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
     }
-    logRecoveryEvent("[PIPELINE] hashline 무결성 검사 중...", "log-emphasis");
   }, 240);
 
   scheduleBlockLifecycleTimer(function runRuleCheck() {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
     }
-    logRecoveryEvent("[PIPELINE] 규칙 충돌 검사 중...", "log-emphasis");
   }, 920);
 
   scheduleBlockLifecycleTimer(function runRebuild() {
@@ -2855,8 +3096,7 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
     if (recoverFile) {
       unlockBlock0File(recoverFile, "패치 재조립: " + recoverFile);
     } else {
-      renderInvestigationPanel("패치 인덱스 갱신 완료");
-      logRecoveryEvent("[PIPELINE] 패치 인덱스 갱신 완료", "log-muted");
+      renderInvestigationPanel();
     }
   }, 1580);
   scheduleBlockLifecycleTimer(function finishRecoveryPipeline() {
@@ -2875,14 +3115,12 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
   if (isNewTag) {
     collectedTags.push(tagToCollect);
     logSuccess("새 태그 획득 [" + tagToCollect + "]");
-  } else {
-    logSystem("태그 확인 [" + tagToCollect + "]");
   }
 
   if (!isNewTag) {
     renderBlock0Panel();
     renderInvestigationPanel();
-    touchBlock0Activity();
+    touchPuzzleActivity(targetPrefix);
     return;
   }
 
@@ -2892,9 +3130,7 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
 
   renderBlock0Panel();
   renderInvestigationPanel();
-  if (targetPrefix === "block0") {
-    touchBlock0Activity();
-  }
+  touchPuzzleActivity(targetPrefix);
 }
 
 /** 재료 배열로 합성 결과를 계산한다(명시 레시피 -> 타입 기반 순). */
@@ -2932,7 +3168,6 @@ function applyBlock0SynthesisResult(synthesisResult) {
     logSuccess("레시피 발견 [" + synthesisResult.recipeText + "]");
   }
   collectBlock0Tag(synthesisResult.resultTag, synthesisResult.resultTag, prefix);
-  logSystem("조각 조합 기록 완료: 기존 조각은 유지되고 결과 조각이 추가되었습니다.");
   renderBlock0Panel();
 }
 
@@ -2992,11 +3227,7 @@ function handleBlock0InventoryDragStart(dragEvent) {
   }
 
   syncInvestigationReadOnlyState();
-
-  if (!state.block0DragHintShown) {
-    logSystem("[안내] 인벤토리 드롭은 위치 이동, 합성 영역 드롭은 합성입니다.");
-    state.block0DragHintShown = true;
-  }
+  state.block0DragHintShown = true;
 
   setFusionDockDragState(block0DraggedTag);
   target.classList.add("is-dragging");
@@ -3050,9 +3281,7 @@ function handleBlock0InventoryDrop(dragEvent) {
     if (movedTag) {
       collectedTags.push(movedTag);
       renderBlock0Panel();
-      if (prefix === "block0") {
-        touchBlock0Activity();
-      }
+      touchPuzzleActivity(prefix);
       finalizeBlock0DragOperation();
     }
     return;
@@ -3070,9 +3299,7 @@ function handleBlock0InventoryDrop(dragEvent) {
   insertIdx = sourceIdx < targetIdx ? targetIdx - 1 : targetIdx;
   collectedTags.splice(Math.max(0, insertIdx), 0, movedTag);
   renderBlock0Panel();
-  if (prefix === "block0") {
-    touchBlock0Activity();
-  }
+  touchPuzzleActivity(prefix);
   finalizeBlock0DragOperation();
 }
 
@@ -3095,9 +3322,8 @@ function handleBlock0FusionDockDrop(dragEvent) {
       logWarn("연산자 조각을 조합 영역에 먼저 놓으세요.");
       return;
     }
-    logSystem("조합 시작: " + block0FusionDraft.operator);
     renderBlock0Panel();
-    touchBlock0Activity();
+    touchPuzzleActivity(getActivePuzzlePrefix());
     finalizeBlock0DragOperation();
     return;
   }
@@ -3106,7 +3332,7 @@ function handleBlock0FusionDockDrop(dragEvent) {
     logWarn("요구되는 조각 타입과 일치하지 않습니다.");
     return;
   }
-  touchBlock0Activity();
+  touchPuzzleActivity(getActivePuzzlePrefix());
   finalizeBlock0DragOperation();
 }
 
@@ -3139,7 +3365,7 @@ function handleBlock0FusionDockClick(clickEvent) {
       resetBlock0FusionDraft();
       renderBlock0Panel();
       setFusionDockDragState(block0DraggedTag);
-      touchBlock0Activity();
+      touchPuzzleActivity(getActivePuzzlePrefix());
     }
     clearBlock0FusionSlotHoverState();
     return;
@@ -3154,7 +3380,7 @@ function handleBlock0FusionDockClick(clickEvent) {
   clearBlock0FusionSlotHoverState();
   renderBlock0Panel();
   setFusionDockDragState(block0DraggedTag);
-  touchBlock0Activity();
+  touchPuzzleActivity(getActivePuzzlePrefix());
 }
 
 /** drag 종료 시 임시 상태를 정리한다. */
@@ -3198,9 +3424,7 @@ function handleBlock0PurposeSlotDrop(dragEvent) {
 
   state[prefix + "PurposeValue"] = droppedTag;
   renderBlock0Panel();
-  if (prefix === "block0") {
-    touchBlock0Activity();
-  }
+  touchPuzzleActivity(prefix);
   if (currentQuestion && expectedAnswer && state[prefix + "PurposeValue"] === expectedAnswer) {
     handleBlock0ExecuteClick();
   }
@@ -3239,34 +3463,40 @@ function onBlock1FileOpened(path) {
   if (getPuzzlePrefixForPath(path) === "block1") {
     block1ActiveRecoveryFile = String(path || "").split("/").pop() || "";
     renderBlock0Panel();
+    touchPuzzleActivity("block1");
   }
   if (block1Lifecycle) {
     block1Lifecycle.onFileOpened(path);
   }
 }
 
-/** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
-function handleInvestigationPreviewClick(clickEvent) {
-  var recoveryAction = clickEvent.target ? clickEvent.target.closest(".preview-recovery-action") : null;
-  var target = clickEvent.target ? clickEvent.target.closest(".preview-tag-link") : null;
+function activatePendingRecoveryPrompt() {
   var pendingFile = "";
-  var pendingTag = "";
-
-  if (recoveryAction) {
-    if (state.phase !== FLOW_PHASE.STREAMING || block0AnswerRecoveryActive || !block0PendingRecoveryPrompt) {
-      return;
-    }
-    pendingFile = String(recoveryAction.dataset.fileName || block0PendingRecoveryPrompt.fileName || "");
-    pendingTag = String(recoveryAction.dataset.requiredTag || block0PendingRecoveryPrompt.requiredTag || "");
-    block0ActiveRecoveryFile = pendingFile;
-    state.block0ClauseVisible = true;
-    state.block0PurposeValue = "";
-    renderBlock0Panel();
-    pulseBlock0Clause("is-goal-alert");
-    logSystem("복구 문제 로드: " + pendingFile + " · 준비 조건 태그 " + (pendingTag || "조건 확인 필요") + " 확인 · 태그 합성 후 슬롯에 드롭");
-    block0PendingRecoveryPrompt = null;
+  if (state.phase !== FLOW_PHASE.STREAMING || block0AnswerRecoveryActive || !block0PendingRecoveryPrompt) {
     return;
   }
+
+  pendingFile = String(block0PendingRecoveryPrompt.fileName || "");
+  block0ActiveRecoveryFile = pendingFile;
+  state.block0ClauseVisible = true;
+  state.block0PurposeValue = "";
+  block0PendingRecoveryPrompt = null;
+  renderBlock0Panel();
+  renderInvestigationPanel();
+  pulseBlock0Clause("is-goal-alert");
+  touchPuzzleActivity("block0");
+}
+
+function handleWorkbenchActionButtonClick() {
+  var action = elements.block0ActionButton ? String(elements.block0ActionButton.dataset.action || "") : "";
+  if (action === "start-recovery") {
+    activatePendingRecoveryPrompt();
+  }
+}
+
+/** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
+function handleInvestigationPreviewClick(clickEvent) {
+  var target = clickEvent.target ? clickEvent.target.closest(".preview-tag-link") : null;
 
   if (!target || !target.dataset) {
     return;
@@ -3302,9 +3532,7 @@ function handleBlock0PurposeSlotClick() {
     elements.block0PurposeSlot.classList.remove("is-drop-hover");
   }
   renderBlock0Panel();
-  if (prefix === "block0") {
-    touchBlock0Activity();
-  }
+  touchPuzzleActivity(prefix);
 }
 
 function handleBlock0ExecuteClick() {
@@ -3336,7 +3564,8 @@ function handleBlock0ExecuteClick() {
       block1ActiveRecoveryFile = "";
       pulseBlock0Clause("is-goal-clear");
       renderBlock0Panel();
-      renderInvestigationPanel("다음 block-1 복구 식을 계속 진행하세요.");
+      renderInvestigationPanel();
+      touchPuzzleActivity("block1");
       return;
     }
     completeBlock1ClauseIfReady();
@@ -3361,14 +3590,11 @@ function handleBlock0ExecuteClick() {
       }
       pulseBlock0Clause("is-goal-clear");
       renderBlock0Panel();
-      if (nextTargetFile) {
-        renderInvestigationPanel("다음 복구 파일 잠금 해제 가능");
-        logSystem("다음 복구 파일을 선택해 잠금 해제 조건을 확인하세요.");
-      } else {
-        renderInvestigationPanel("최종 복구 식이 열렸습니다. 앞서 복구한 식을 바탕으로 마지막 답을 완성하세요.");
-        logSystem("최종 복구 식 로드: 기존에 복구한 결과를 조합해 마지막 답을 슬롯에 넣으세요.");
+      renderInvestigationPanel();
+      if (!nextTargetFile) {
         pulseBlock0Clause("is-goal-alert");
       }
+      touchPuzzleActivity("block0");
       return;
     }
     completeBlock0ClauseIfReady();
@@ -3399,8 +3625,9 @@ function completeBlock1ClauseIfReady() {
   BLOCK1_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
-  renderInvestigationPanel("block-1 복구 완료");
+  renderInvestigationPanel();
   renderBlock0Panel();
+  clearPuzzleIdleHint();
 }
 
 /** Clause 완료 조건을 검사하고 복원 문장/기억 조각을 연다. */
@@ -3430,17 +3657,14 @@ function completeBlock0ClauseIfReady() {
   });
   logSystem(BLOCK0_SPEC.memory.title + ": " + BLOCK0_SPEC.memory.text);
   syncBlock0Fs();
-  renderInvestigationPanel("block-1 폴더가 열렸습니다. 폴더로 이동해 다음 복구를 진행하세요.");
+  renderInvestigationPanel();
   if (block0Lifecycle) {
     block0Lifecycle.onComplete({ reason: "clause-complete" });
   }
   setBlock0MemoryModalVisible(true);
   renderBlock0Panel();
 
-  if (state.block0IdleHintTimer) {
-    clearTimeout(state.block0IdleHintTimer);
-    state.block0IdleHintTimer = 0;
-  }
+  clearPuzzleIdleHint();
 }
 
 // ----- 터미널 로그/히스토리 -----

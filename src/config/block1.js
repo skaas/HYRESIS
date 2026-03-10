@@ -46,11 +46,15 @@ export const BLOCK1_SPEC = {
         id: "Q1-1",
         prompt: "관측가능(x) => ?",
         answer: "분리(관측자, 대상)",
+        actionText: "관측-조건.log의 정의를 읽고 관측가능(x) 뒤에 오는 분리 조건을 복원하세요.",
+        idleText: "관측 가능 조건은 관측자와 대상의 분리를 먼저 요구합니다.",
       },
       {
         id: "Q1-2",
         prompt: "관측(자기, 자기) ∧ ¬분리(관측자, 대상) => ?",
         answer: "¬정의(자기, 자기)",
+        actionText: "자기관측.log와 정의-귀결.log를 대조해 자기 관측의 귀결을 닫으세요.",
+        idleText: "자기 관측과 분리 실패가 함께 있으면 자기 정의가 무너집니다.",
       },
     ],
     outputText: [

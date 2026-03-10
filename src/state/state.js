@@ -35,6 +35,7 @@ export const state = {
   block0MemoryUnlocked: false,
   block0DragHintShown: false,
   block0IdleHintTimer: 0,
+  block0IdleHintActive: false,
   block0DiscoveredRecipes: [],
   block1Started: false,
   block1VisibleFiles: [],
@@ -45,6 +46,7 @@ export const state = {
   block1PurposeValue: "",
   block1QuestionIndex: 0,
   block1SolvedAnswers: [],
+  block1IdleHintActive: false,
   block1DiscoveredRecipes: [],
 };
 
@@ -77,6 +79,11 @@ export const elements = {
   investigationList: null,
   investigationContent: null,
   block0Status: null,
+  block0ActionCard: null,
+  block0ActionState: null,
+  block0ActionTitle: null,
+  block0ActionBody: null,
+  block0ActionButton: null,
   block0TagInventory: null,
   block0FusionDock: null,
   block0RecipeList: null,
