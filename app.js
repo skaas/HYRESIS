@@ -48,8 +48,8 @@ var block0CurrentContext = {
   file: "",
   tag: "",
 };
-var DEFAULT_PREVIEW_HINT = "파일을 열면 원문과 복구 증거가 표시됩니다.";
-var EMPTY_RECIPE_HINT = "아직 기록된 조합이 없습니다.";
+var DEFAULT_PREVIEW_HINT = "open a remote file to inspect evidence.";
+var EMPTY_RECIPE_HINT = "no compiled bindings yet.";
 var SHELL_NARRATIVE_ONLY = true;
 var block0Lifecycle = null;
 var block1Lifecycle = null;
@@ -187,9 +187,9 @@ function flushRecoveryShellDigest() {
   hiddenCount = Math.max(0, recoveryShellDigestQueue.length - 1);
   recoveryShellDigestQueue = [];
   if (hiddenCount > 0) {
-    summary += " 외 " + hiddenCount + "건";
+    summary += " +" + hiddenCount;
   }
-  appendLogLine("[RECOVERY] " + summary, "log-muted");
+  appendLogLine("repair digest: " + summary, "log-muted");
 }
 
 function logRecoveryEvent(text, tone) {
@@ -398,15 +398,15 @@ function escapeHtml(text) {
 function buildBlock0HintPanelHtml() {
   if (getActivePuzzlePrefix() === "block1") {
     if (state.block1DiscoveredRecipes.length === 0 && state.block1SolvedAnswers.length === 0) {
-      return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
+      return '<div class="hint-empty">no trace entries recorded.</div>';
     }
     return (
       '<div class="hint-section">' +
-      '<div class="hint-section-title">복구 기록</div>' +
+      '<div class="hint-section-title">repair trace</div>' +
       state.block1DiscoveredRecipes.map(function renderRecipe(recipeText) {
         return (
           '<div class="hint-row">' +
-          '<span class="hint-chip">조합</span>' +
+          '<span class="hint-chip">compile</span>' +
           '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
           "</div>"
         );
@@ -414,7 +414,7 @@ function buildBlock0HintPanelHtml() {
       state.block1SolvedAnswers.map(function renderSolved(answerText) {
         return (
           '<div class="hint-row">' +
-          '<span class="hint-chip">복구</span>' +
+          '<span class="hint-chip">commit</span>' +
           '<span class="hint-main">' + escapeHtml(answerText) + "</span>" +
           "</div>"
         );
@@ -437,9 +437,9 @@ function buildBlock0HintPanelHtml() {
     var hintSpec = resultTag ? synthesisHints[resultTag] || null : null;
     recipeLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">' + escapeHtml((hintSpec && hintSpec.colorHint) || "조합") + "</span>" +
+      '<span class="hint-chip">' + escapeHtml((hintSpec && hintSpec.colorHint) || "compile") + "</span>" +
       '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
-      '<span class="hint-note">' + escapeHtml((hintSpec && hintSpec.note) || "필요한 조각을 맞춰 결과 조각을 만든다.") + "</span>" +
+      '<span class="hint-note">' + escapeHtml((hintSpec && hintSpec.note) || "resolver emitted a new fragment from the bound signature.") + "</span>" +
       "</div>"
     );
     recipeIndex += 1;
@@ -448,7 +448,7 @@ function buildBlock0HintPanelHtml() {
   while (solvedIndex < state.block0SolvedAnswers.length && solvedIndex < interpretations.length) {
     interpretationLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">해석</span>' +
+      '<span class="hint-chip">commit</span>' +
       '<span class="hint-main">' + escapeHtml(interpretations[solvedIndex]) + "</span>" +
       "</div>"
     );
@@ -458,24 +458,24 @@ function buildBlock0HintPanelHtml() {
   if (state.block0MemoryUnlocked && hints.block1FolderHint) {
     interpretationLines.push(
       '<div class="hint-row">' +
-      '<span class="hint-chip">다음 단계</span>' +
+      '<span class="hint-chip">next</span>' +
       '<span class="hint-main">' + escapeHtml(hints.block1FolderHint) + "</span>" +
       "</div>"
     );
   }
 
   if (recipeLines.length === 0 && interpretationLines.length === 0) {
-    return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
+    return '<div class="hint-empty">no trace entries recorded.</div>';
   }
 
   return (
     '<div class="hint-section">' +
-    '<div class="hint-section-title">합성 기록</div>' +
-    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">합성 기록이 생기면 여기에 남습니다.</div>') +
+    '<div class="hint-section-title">compile trace</div>' +
+    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">compiled bindings appear here.</div>') +
     "</div>" +
     '<div class="hint-section">' +
-    '<div class="hint-section-title">해석 기록</div>' +
-    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">복구가 진행되면 현재까지의 의미가 정리됩니다.</div>') +
+    '<div class="hint-section-title">commit trace</div>' +
+    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">committed clauses appear here.</div>') +
     "</div>"
   );
 }
@@ -483,18 +483,18 @@ function buildBlock0HintPanelHtml() {
 function getBlock0StageHintText() {
   var question = getBlock0CurrentQuestion();
   if (!question) {
-    return "현재 복구 단계의 증거를 다시 확인하세요.";
+    return "reload evidence for the active repair stage.";
   }
   if (question.id === "Q0-2") {
-    return "대상이 인간이면 비해침 대상도 인간으로 맞춰야 합니다.";
+    return "human-target help requires a human-target non-harm binding.";
   }
   if (question.id === "Q0-3") {
-    return "설계식에서 필수보존(비해침) 형태를 복원하세요.";
+    return "design(self) resolves to preservation of non-harm.";
   }
   if (question.id === "Q0-4") {
-    return "앞 단계 결과를 재사용해 최종 누락 식을 패치하세요.";
+    return "reuse cached bindings to close the final clause.";
   }
-  return "현재 복구 단계의 증거를 다시 확인하세요.";
+  return "reload evidence for the active repair stage.";
 }
 
 function clearPuzzleIdleHint() {
@@ -544,6 +544,36 @@ function hasOpenPuzzlePreview(prefix) {
   return Boolean(previewFilePath) && Boolean(fileIndex[previewFilePath]) && previewFileLines.length > 0;
 }
 
+function getWorkbenchSourceFile(prefix) {
+  var activePrefix = prefix || getActivePuzzlePrefix();
+  var fileIndex = getPuzzleFileIndex(activePrefix);
+  if (previewFilePath && fileIndex[previewFilePath]) {
+    return previewFilePath.split("/").pop() || "none";
+  }
+  return block0CurrentContext.file || "none";
+}
+
+function getWorkbenchEvidenceSummary(prefix) {
+  var activePrefix = prefix || getActivePuzzlePrefix();
+  var fileIndex = getPuzzleFileIndex(activePrefix);
+  var fileSpec = previewFilePath ? fileIndex[previewFilePath] : null;
+  var candidates = fileSpec && Array.isArray(fileSpec.candidates) ? fileSpec.candidates.slice(0, 4) : [];
+  if (candidates.length > 0) {
+    return candidates.join(", ");
+  }
+  return block0CurrentContext.tag || "none";
+}
+
+function buildWorkbenchContext(prefix, sessionState, targetFile, requiredTag) {
+  return {
+    sessionState: sessionState || "idle",
+    sourceFile: getWorkbenchSourceFile(prefix),
+    targetFile: targetFile || "none",
+    requiredTag: requiredTag || "none",
+    linkedEvidence: getWorkbenchEvidenceSummary(prefix),
+  };
+}
+
 function buildWorkbenchActionViewModel(prefix) {
   var spec = getPuzzleSpec(prefix);
   var currentQuestion = getPuzzleCurrentQuestion(prefix);
@@ -554,7 +584,7 @@ function buildWorkbenchActionViewModel(prefix) {
   var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var hasOpenPreview = hasOpenPuzzlePreview(prefix);
   var isIdleHintActive = Boolean(state[prefix + "IdleHintActive"]);
-  var questionTitle = activeRecoveryFile ? (activeRecoveryFile + " 복구") : ((spec.title || "복구 단계") + " 진행");
+  var questionTitle = activeRecoveryFile ? ("repair mount: " + activeRecoveryFile) : ("repair queue: " + (spec.title || "archive"));
   var questionActionText = getQuestionUiText(currentQuestion, "actionText");
   var idleActionText = getQuestionUiText(currentQuestion, "idleText");
   var resolvedActionText = getQuestionUiText(previousQuestion, "resolvedText");
@@ -562,13 +592,15 @@ function buildWorkbenchActionViewModel(prefix) {
   var block0Rule = getBlock0UnlockRuleByFile(block0TargetFile);
   var block0Requirement = block0Rule ? String(block0Rule.whenTag || "") : "";
   var block0TargetReady = prefix === "block0" ? isBlock0UnlockRuleSatisfied(block0TargetFile) : false;
+  var context = buildWorkbenchContext(prefix, "idle", activeRecoveryFile || block0TargetFile || "", block0Requirement);
 
   if (state.phase !== FLOW_PHASE.STREAMING) {
     return {
       toneClass: "",
-      stateLabel: "OFFLINE",
-      title: "세션 대기",
-      body: "로그인 후 복구 인덱스와 현재 단계가 여기에 표시됩니다.",
+      stateLabel: "DETACHED",
+      title: "session detached",
+      body: "awaiting operator attach.",
+      context: buildWorkbenchContext(prefix, "detached", "", ""),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -577,9 +609,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (block0AnswerRecoveryActive) {
     return {
       toneClass: "is-processing",
-      stateLabel: "PROCESSING",
-      title: "패치 검증 중",
-      body: "무결성 검사와 인덱스 갱신이 끝날 때까지 작업대가 잠깁니다.",
+      stateLabel: "PATCHING",
+      title: "patch pipeline active",
+      body: "hashline check -> rebuild -> commit.",
+      context: buildWorkbenchContext(prefix, "patching", activeRecoveryFile || block0TargetFile || "", block0Requirement),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -590,12 +623,11 @@ function buildWorkbenchActionViewModel(prefix) {
     var pendingQuestion = block0PendingRecoveryPrompt.questionText || "질문 정보를 불러오는 중입니다.";
     return {
       toneClass: "is-ready",
-      stateLabel: "READY",
-      title: block0PendingRecoveryPrompt.fileName + " 복구 시작",
-      body:
-        "문제: " + pendingQuestion + " 준비 태그: " + pendingTag +
-        ". PREVIEW에는 방금 읽은 증거가 유지됩니다. 작업대에서 복구를 시작하세요.",
-      ctaLabel: "복구 시작",
+      stateLabel: "ARMED",
+      title: "repair target armed",
+      body: pendingQuestion,
+      context: buildWorkbenchContext(prefix, "armed", block0PendingRecoveryPrompt.fileName, pendingTag),
+      ctaLabel: "attach repair",
       ctaAction: "start-recovery",
     };
   }
@@ -603,9 +635,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (prefix === "block0" && state.block0MemoryUnlocked && !state.block1Started) {
     return {
       toneClass: "is-resolved",
-      stateLabel: "NEXT",
-      title: "다음 복구 준비 완료",
-      body: "기억 조각을 확인한 뒤 block-1 폴더로 이동해 다음 복구를 이어가세요.",
+      stateLabel: "ARCHIVE",
+      title: "next archive flagged",
+      body: "memory segment committed. block-1 is ready to mount.",
+      context: buildWorkbenchContext(prefix, "archive-ready", "block-1", ""),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -615,8 +648,9 @@ function buildWorkbenchActionViewModel(prefix) {
     return {
       toneClass: "is-processing",
       stateLabel: "SYNC",
-      title: "block-1 인덱스 동기화 중",
-      body: "새 파일이 열리면 여기서 다음 행동을 안내합니다.",
+      title: "archive sync active",
+      body: "waiting for restored files.",
+      context: buildWorkbenchContext(prefix, "sync", activeRecoveryFile || "", ""),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -626,8 +660,9 @@ function buildWorkbenchActionViewModel(prefix) {
     return {
       toneClass: "is-resolved",
       stateLabel: "RESOLVED",
-      title: (spec.title || "복구 단계") + " 완료",
-      body: "로그에는 결과만 남기고, 다음 단계 증거는 PREVIEW와 인덱스에서 이어집니다.",
+      title: "repair sequence resolved",
+      body: "current archive closed. inspect next evidence stream.",
+      context: buildWorkbenchContext(prefix, "resolved", activeRecoveryFile || block0TargetFile || "", ""),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -637,9 +672,10 @@ function buildWorkbenchActionViewModel(prefix) {
     if (prefix === "block0" && block0TargetReady) {
       return {
         toneClass: "is-ready",
-        stateLabel: "SELECT",
-        title: "다음 복구 파일 선택",
-        body: resolvedActionText || ((block0TargetFile || "다음 파일") + "을 선택해 다음 복구 문제를 여세요."),
+        stateLabel: "READY",
+        title: "repair target available",
+        body: resolvedActionText || ("select " + (block0TargetFile || "target") + " to arm the next clause."),
+        context: buildWorkbenchContext(prefix, "ready", block0TargetFile || "", block0Requirement),
         ctaLabel: "",
         ctaAction: "",
       };
@@ -647,18 +683,20 @@ function buildWorkbenchActionViewModel(prefix) {
     if (prefix === "block0" && hasOpenPreview) {
       return {
         toneClass: "",
-        stateLabel: "ACTION",
-        title: "잠금 조건 맞추기",
-        body: (block0Requirement ? (block0Requirement + " 태그를 확보해 잠금 조건을 만족시키세요.") : "PREVIEW의 후보 태그를 눌러 잠금 조건을 만족시키세요."),
+        stateLabel: "SCAN",
+        title: "lock rule unresolved",
+        body: block0Requirement ? ("awaiting tag link: " + block0Requirement) : "scan preview and link a valid tag.",
+        context: buildWorkbenchContext(prefix, "scan", block0TargetFile || "", block0Requirement),
         ctaLabel: "",
         ctaAction: "",
       };
     }
     return {
       toneClass: "",
-      stateLabel: "ACTION",
-      title: "증거 파일 열기",
-      body: prefix === "block0" ? "부팅.log를 열어 첫 조각과 잠금 조건을 확인하세요." : "새로 열린 파일을 열어 복구를 이어가세요.",
+      stateLabel: "IDLE",
+      title: "source scan required",
+      body: prefix === "block0" ? "open boot.log to attach the first evidence stream." : "open a restored log to continue repair.",
+      context: buildWorkbenchContext(prefix, "idle", block0TargetFile || "", block0Requirement),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -667,9 +705,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!currentQuestion) {
     return {
       toneClass: "",
-      stateLabel: "ACTION",
-      title: "현재 단계 확인",
-      body: "복구에 필요한 증거와 조각을 다시 확인하세요.",
+      stateLabel: "CHECK",
+      title: "clause metadata unavailable",
+      body: "inspect evidence and reload the active clause.",
+      context: context,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -678,9 +717,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (currentPurpose && currentAnswer && currentPurpose !== currentAnswer) {
     return {
       toneClass: "is-warning",
-      stateLabel: "RETRY",
-      title: "다른 조각으로 다시 시도",
-      body: "현재 슬롯의 " + currentPurpose + "는 문제와 맞지 않습니다. PREVIEW의 증거를 다시 보고 조각을 바꿔 보세요.",
+      stateLabel: "INVALID",
+      title: "binding rejected",
+      body: currentPurpose + " does not satisfy the mounted clause.",
+      context: buildWorkbenchContext(prefix, "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -689,9 +729,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (prefix === "block1" && !hasOpenPreview && state.block1VisibleFiles.length > 0 && collectedTags.length === 0) {
     return {
       toneClass: "",
-      stateLabel: "ACTION",
-      title: "열린 로그 확인",
-      body: "새로 열린 로그를 읽고 필요한 조각을 수집하세요.",
+      stateLabel: "SCAN",
+      title: "evidence stream available",
+      body: "open the restored log and link fragments.",
+      context: context,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -700,9 +741,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!currentPurpose && currentAnswer && collectedTags.indexOf(currentAnswer) !== -1) {
     return {
       toneClass: "is-ready",
-      stateLabel: "READY",
+      stateLabel: "BOUND",
       title: questionTitle,
-      body: "필요한 조각을 이미 확보했습니다. 슬롯에 넣으면 즉시 검증이 진행됩니다.",
+      body: "resolved fragment cached. drop it into the binding slot.",
+      context: buildWorkbenchContext(prefix, "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
       ctaLabel: "",
       ctaAction: "",
     };
@@ -710,11 +752,12 @@ function buildWorkbenchActionViewModel(prefix) {
 
   return {
     toneClass: isIdleHintActive ? "is-ready" : "",
-    stateLabel: isIdleHintActive ? "HINT" : "ACTION",
-    title: questionTitle,
+    stateLabel: isIdleHintActive ? "HINT" : "MOUNTED",
+    title: isIdleHintActive ? "operator hint loaded" : questionTitle,
     body:
       (isIdleHintActive ? idleActionText : questionActionText) ||
-      (isIdleHintActive ? getBlock0StageHintText() : "PREVIEW의 증거를 읽고 필요한 조각을 수집하거나 조합한 뒤 슬롯에 넣으세요."),
+      (isIdleHintActive ? getBlock0StageHintText() : "inspect preview, resolve a fragment, bind it to the mounted clause."),
+    context: buildWorkbenchContext(prefix, isIdleHintActive ? "hint" : "mounted", activeRecoveryFile || block0TargetFile || "", block0Requirement),
     ctaLabel: "",
     ctaAction: "",
   };
@@ -1530,6 +1573,11 @@ function cacheElements() {
   elements.block0ActionTitle = document.getElementById("block0-action-title");
   elements.block0ActionBody = document.getElementById("block0-action-body");
   elements.block0ActionButton = document.getElementById("block0-action-button");
+  elements.block0ContextSession = document.getElementById("block0-context-session");
+  elements.block0ContextSource = document.getElementById("block0-context-source");
+  elements.block0ContextTarget = document.getElementById("block0-context-target");
+  elements.block0ContextRequired = document.getElementById("block0-context-required");
+  elements.block0ContextEvidence = document.getElementById("block0-context-evidence");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
   elements.block0FusionDock = document.getElementById("block0-fusion-dock");
   elements.block0RecipeList = document.getElementById("block0-recipe-list");
@@ -1741,11 +1789,11 @@ function handleAuthFormSubmit(submitEvent) {
       setFlowPhase(FLOW_PHASE.ATTACHING);
       setAuthCardMode("is-success");
       setAuthStatus("SESSION ESTABLISHED");
-      logSuccess("[AUTH] session established.");
+      logSuccess("session attached: observer");
 
       setTimeout(function attachStage() {
         setAuthStatus("TERMINAL ATTACHING");
-        logSystem("[AUTH] attaching terminal channel...");
+        logSystem("channel attach in progress...");
       }, 180);
 
       setTimeout(function enterFtpSession() {
@@ -1824,9 +1872,9 @@ function setAuthFormEnabled(enabled) {
 function startInvestigationMode() {
   var introLines = [
     { text: buildRestoredStampLine(), tone: "log-restored" },
-    { text: "Connected to hyresis.local (read-only).", tone: "log-success" },
-    { text: "Login successful: observer", tone: "log-muted" },
-    { text: "Recovery index loaded.", tone: "log-muted" },
+    { text: "link ready: hyresis.local (ro)", tone: "log-success" },
+    { text: "session attached: observer", tone: "log-muted" },
+    { text: "recovery index online", tone: "log-muted" },
   ];
   var index = 0;
 
@@ -1907,7 +1955,7 @@ function setTerminalConnected(connected) {
 }
 
 function refreshTerminalSummaryText() {
-  var fallback = "요약 없음";
+  var fallback = "no recent event";
   var summary = terminalSummaryLines.length > 0 ? terminalSummaryLines[terminalSummaryLines.length - 1] : fallback;
   if (elements.terminalSummaryText) {
     elements.terminalSummaryText.textContent = summary;
@@ -1938,34 +1986,34 @@ function buildTerminalSummaryCandidate(text, tone) {
     return null;
   }
 
-  if (safeText.indexOf("[AUTH] session established.") === 0 || safeText.indexOf("Connected to hyresis.local") === 0) {
-    return { text: "FTP 세션 연결 완료", key: "session-ready" };
+  if (safeText.indexOf("session attached: observer") === 0 || safeText.indexOf("link ready: hyresis.local") === 0) {
+    return { text: "session attached", key: "session-ready" };
   }
   if (safeText.indexOf("cwd -> ") === 0) {
-    return { text: "경로 이동: " + safeText.replace("cwd -> ", ""), key: safeText };
+    return { text: "cwd changed", key: safeText };
   }
-  if (safeText.indexOf("[RECOVERY] ") === 0) {
-    return { text: safeText.replace("[RECOVERY] ", ""), key: safeText.replace("[RECOVERY] ", "") };
+  if (safeText.indexOf("repair digest: ") === 0) {
+    return { text: safeText, key: safeText };
   }
   if (safeText.indexOf("[PIPELINE] ") === 0) {
-    if (safeText.indexOf("검사 중") !== -1) {
-      return { text: "복구 연산 진행 중", key: "pipeline-running" };
+    if (safeText.indexOf("running") !== -1) {
+      return { text: "patch pipeline active", key: "pipeline-running" };
     }
     return { text: safeText.replace("[PIPELINE] ", ""), key: safeText };
   }
 
-  match = safeText.match(/^새 태그 획득 \[(.+)\]$/);
+  match = safeText.match(/^tag linked: (.+)$/);
   if (match) {
-    return { text: "태그 획득: " + match[1], key: "tag:" + match[1] };
+    return { text: "tag linked: " + match[1], key: "tag:" + match[1] };
   }
 
-  match = safeText.match(/^레시피 발견 \[(.+)\]$/);
+  match = safeText.match(/^resolver compiled: (.+)$/);
   if (match) {
-    return { text: "합성식 발견: " + match[1], key: "recipe:" + match[1] };
+    return { text: "resolver compiled", key: "recipe:" + match[1] };
   }
 
-  if (safeText.indexOf("download complete") === 0) {
-    return { text: "파일 수신 완료: " + (block0CurrentContext.file || "현재 파일"), key: "download:" + (block0CurrentContext.file || safeText) };
+  if (safeText.indexOf("transfer complete: ") === 0) {
+    return { text: safeText, key: safeText };
   }
 
   if (safeTone === "log-warn" || safeTone === "log-alert" || safeTone === "log-success" || safeTone === "log-restored") {
@@ -2211,6 +2259,12 @@ function buildInvestigationRowButton(options) {
   if (meta.recovered) {
     button.classList.add("item-recovered");
   }
+  if (meta.armed) {
+    button.classList.add("item-armed");
+  }
+  if (meta.mounted) {
+    button.classList.add("item-mounted");
+  }
   button.dataset.path = options.path || "";
   button.dataset.kind = type;
   button.dataset.locked = meta.locked ? "true" : "false";
@@ -2268,13 +2322,18 @@ function getFsChildrenRows(cwd, entry) {
       var visibleType = visibleEntry && visibleEntry.type === "dir" ? "dir" : "file";
 
       if (visibleName !== "block-1") {
-        rows.push({
-          name: visibleName,
-          path: visiblePath,
-          type: visibleType,
-          ext: visibleType === "dir" ? "" : getFileExt(visibleName),
-          meta: Object.assign({}, LOG_META[visiblePath] || {}, { recovered: true }),
-        });
+      rows.push({
+        name: visibleName,
+        path: visiblePath,
+        type: visibleType,
+        ext: visibleType === "dir" ? "" : getFileExt(visibleName),
+        meta: Object.assign({}, LOG_META[visiblePath] || {}, {
+          recovered: true,
+          attr:
+            ((LOG_META[visiblePath] || {}).attr || "RO,LOG") +
+            (previewFilePath === visiblePath ? ",OPENED" : ""),
+        }),
+      });
       }
       index += 1;
     }
@@ -2300,10 +2359,15 @@ function getFsChildrenRows(cwd, entry) {
         meta: {
           date: "--.--.--",
           time: "--:--",
-          attr: isRecoverable ? "LOCK,READY" : "LOCK,BLOCKED",
+          attr:
+            (isRecoverable ? "LOCK,READY" : "LOCK,BLOCKED") +
+            (block0PendingRecoveryPrompt && block0PendingRecoveryPrompt.fileName === hiddenName ? ",ARMED" : "") +
+            (block0ActiveRecoveryFile === hiddenName ? ",MOUNTED" : ""),
           locked: true,
           recoverable: isRecoverable,
           blocked: !isRecoverable,
+          armed: Boolean(block0PendingRecoveryPrompt) && block0PendingRecoveryPrompt.fileName === hiddenName,
+          mounted: block0ActiveRecoveryFile === hiddenName,
           requiredTag: isRecoverable ? currentRequirementTag : "",
           requiredFile: !isRecoverable ? questionTargetFile : "",
         },
@@ -2630,13 +2694,15 @@ function handleInvestigationItemClick(clickEvent) {
     markInvestigationRowLoading(target, false);
     if (recoveryState === "recoverable") {
       renderRecoverablePreviewPrompt(fileName, requiredTag);
+      logSuccess("repair target armed: " + fileName);
       renderBlock0Panel();
+      renderInvestigationPanel();
       touchPuzzleActivity("block0");
       return;
     }
     block0PendingRecoveryPrompt = null;
     pinTextPreview(
-      "[LOCK BLOCKED] " + fileName + "\n선행 복구가 필요합니다.\n먼저 복구: " + (requiredFile || "이전 단계 파일"),
+      "[LOCK BLOCKED] " + fileName + "\nrequired restore: " + (requiredFile || "previous entry"),
     );
     renderBlock0Panel();
     return;
@@ -2677,7 +2743,7 @@ function listFs(path) {
 
   targetPath = resolved.path;
   entry = resolved.entry;
-  logSystem(buildFtpPath(targetPath));
+  logSystem("ls -> " + buildFtpPath(targetPath));
   while (index < entry.children.length) {
     logInfo("  " + entry.children[index]);
     index += 1;
@@ -2726,7 +2792,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     "",
     []
   );
-  logSystem("retr " + buildFtpPath(targetPath));
+  logSystem("transfer queued: " + (targetPath.split("/").pop() || targetPath));
 
   function tick() {
     var downloaded = 0;
@@ -2751,7 +2817,7 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     }
 
     if (step >= ticks) {
-      logSuccess("download complete (" + formatTransferSize(total) + ")");
+      logSuccess("transfer complete: " + (targetPath.split("/").pop() || targetPath));
       if (typeof done === "function") {
         done();
       }
@@ -2835,22 +2901,22 @@ function buildBlock0PanelViewModel() {
   var action = buildWorkbenchActionViewModel(prefix);
   return {
     statusText:
-      blockTitle + " · 무결성 " + state[prefix + "Integrity"] + "% · 태그 " + collectedTags.length + "개" +
-      (isBlock0 && block0AnswerRecoveryActive ? " · 복구 연산 중" : ""),
+      blockTitle + " · integrity " + state[prefix + "Integrity"] + "% · linked " + collectedTags.length +
+      (isBlock0 && block0AnswerRecoveryActive ? " · pipeline active" : ""),
     action: action,
     tags: tags,
     recipeHtml: buildBlock0HintPanelHtml(),
-    clauseTitle: (((spec.clause || {}).title || spec.title || "복구 대상")) + (activeRecoveryFile ? (" · " + activeRecoveryFile) : ""),
+    clauseTitle: (((spec.clause || {}).title || spec.title || "repair clause")) + (activeRecoveryFile ? (" · " + activeRecoveryFile) : ""),
     clauseTargetBadge: currentQuestion ? patchTarget.badgeText : "완료",
     clauseVisible: state[prefix + "ClauseVisible"],
     clauseGoalReady: state[prefix + "ClauseVisible"] && !state[prefix + "Completed"] && Boolean(currentAnswer) && collectedTags.indexOf(currentAnswer) !== -1,
     clauseCompleted: state[prefix + "Completed"],
     purposeLabel: isBlock0 && block0AnswerRecoveryActive
-      ? "패치 검증 실행 중..."
+      ? "patch pipeline active..."
       : (currentQuestion ? patchTarget.expressionText : (spec.title + " 복구 완료")),
     purposeValue: currentPurpose,
     purposeMatch: Boolean(currentPurpose) && Boolean(currentAnswer) && currentPurpose === currentAnswer,
-    premiseText: isBlock0 && block0AnswerRecoveryActive ? "검증 → 재조립 → 반영 중..." : ("패치 단계 " + solvedCount + "/" + totalQuestions),
+    premiseText: isBlock0 && block0AnswerRecoveryActive ? "hashline -> rebuild -> commit" : ("phase " + solvedCount + "/" + totalQuestions),
     fusion: {
       operator: block0FusionDraft.operator,
       slots: fusionSlots,
@@ -2885,10 +2951,25 @@ function renderBlock0Panel() {
     elements.block0ActionButton.dataset.action = vm.action && vm.action.ctaAction ? vm.action.ctaAction : "";
     elements.block0ActionButton.classList.toggle("is-hidden", !(vm.action && vm.action.ctaLabel));
   }
+  if (elements.block0ContextSession) {
+    elements.block0ContextSession.textContent = vm.action && vm.action.context ? vm.action.context.sessionState : "none";
+  }
+  if (elements.block0ContextSource) {
+    elements.block0ContextSource.textContent = vm.action && vm.action.context ? vm.action.context.sourceFile : "none";
+  }
+  if (elements.block0ContextTarget) {
+    elements.block0ContextTarget.textContent = vm.action && vm.action.context ? vm.action.context.targetFile : "none";
+  }
+  if (elements.block0ContextRequired) {
+    elements.block0ContextRequired.textContent = vm.action && vm.action.context ? vm.action.context.requiredTag : "none";
+  }
+  if (elements.block0ContextEvidence) {
+    elements.block0ContextEvidence.textContent = vm.action && vm.action.context ? vm.action.context.linkedEvidence : "none";
+  }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.innerHTML = "";
     if (vm.tags.length === 0) {
-      elements.block0TagInventory.textContent = "획득한 태그가 없습니다.";
+      elements.block0TagInventory.textContent = "linked fragments: none";
     } else {
       vm.tags.forEach(function renderTag(tagView) {
         var chip = document.createElement("button");
@@ -2926,6 +3007,7 @@ function renderBlock0Panel() {
     var fusion = vm.fusion;
     var slotHtml = fusion.slots.map(function toSlotHtml(slot) {
       var baseClass = "block0-tag-slot block0-fusion-slot";
+      var slotLabel = "arg-" + (slot.index + 1);
       if (slot.value) {
         baseClass += " filled";
       } else if (slot.expecting) {
@@ -2934,17 +3016,17 @@ function renderBlock0Panel() {
       return (
         '<button type="button" class="' + baseClass + '" data-index="' + slot.index + '">' +
         (slot.value || "[     ]") +
-        '<span class="slot-type">' + slot.expectedType + "</span>" +
+        '<span class="slot-type">' + slotLabel + " · " + slot.expectedType + "</span>" +
         "</button>"
       );
     }).join("");
-    var operatorText = fusion.operator ? fusion.operator : "[연산자 조각 배치]";
+    var operatorText = fusion.operator ? fusion.operator : "[mount operator]";
     var operatorClass = "block0-tag-slot block0-fusion-slot operator" + (fusion.operator ? " filled" : " expecting");
     elements.block0FusionDock.innerHTML =
       '<div class="block0-fusion-help-row">' +
       '<div class="block0-fusion-help-wrap">' +
       '<button type="button" class="block0-fusion-help" aria-label="조합 안내">?</button>' +
-      '<div class="block0-fusion-tooltip" role="tooltip">연산자 조각을 먼저 놓고 필요한 조각을 채우면 조합 결과가 생성됩니다.</div>' +
+      '<div class="block0-fusion-tooltip" role="tooltip">mount an operator first, then bind compatible args. the resolver emits a new fragment when the signature closes.</div>' +
       "</div>" +
       "</div>" +
       '<div class="block0-fusion-slots">' +
@@ -2972,7 +3054,7 @@ function renderBlock0Panel() {
   if (elements.block0PurposeSlot) {
     elements.block0PurposeSlot.disabled = block0AnswerRecoveryActive;
     if (!vm.purposeValue) {
-      elements.block0PurposeSlot.textContent = "[태그를 드롭]";
+      elements.block0PurposeSlot.textContent = "[bind fragment]";
       elements.block0PurposeSlot.classList.remove("filled");
       elements.block0PurposeSlot.classList.remove("mismatch");
       elements.block0PurposeSlot.classList.add("expecting");
@@ -2998,7 +3080,7 @@ function setBlock0MemoryModalVisible(visible) {
   }
   if (elements.block0MemoryModalNext) {
     elements.block0MemoryModalNext.disabled = state.block1Started;
-    elements.block0MemoryModalNext.textContent = state.block1Started ? "복구 블록 1 진행 중" : "다음 복구 시작";
+    elements.block0MemoryModalNext.textContent = state.block1Started ? "archive mounted" : "mount next archive";
   }
 }
 
@@ -3037,7 +3119,7 @@ function unlockBlock0File(fileName, panelMessage, logText, tone) {
   if (detailLog) {
     logRecoveryEvent(detailLog, detailTone);
   } else {
-    logRecoveryEvent("복구 완료: " + fileName + " 파일이 해제되었습니다.", detailTone);
+    logRecoveryEvent("archive entry restored: " + fileName, detailTone);
   }
   setTimeout(function markUnlockedRow() {
     if (!elements.investigationList) {
@@ -3114,7 +3196,7 @@ function collectBlock0Tag(selectedTag, rewardTag, prefix) {
   setBlock0ContextTag(tagToCollect);
   if (isNewTag) {
     collectedTags.push(tagToCollect);
-    logSuccess("새 태그 획득 [" + tagToCollect + "]");
+    logSuccess("tag linked: " + tagToCollect);
   }
 
   if (!isNewTag) {
@@ -3165,7 +3247,7 @@ function applyBlock0SynthesisResult(synthesisResult) {
   }
   if (synthesisResult.recipeText && state[prefix + "DiscoveredRecipes"].indexOf(synthesisResult.recipeText) === -1) {
     state[prefix + "DiscoveredRecipes"].push(synthesisResult.recipeText);
-    logSuccess("레시피 발견 [" + synthesisResult.recipeText + "]");
+    logSuccess("resolver compiled: " + synthesisResult.recipeText);
   }
   collectBlock0Tag(synthesisResult.resultTag, synthesisResult.resultTag, prefix);
   renderBlock0Panel();
@@ -3481,6 +3563,7 @@ function activatePendingRecoveryPrompt() {
   state.block0ClauseVisible = true;
   state.block0PurposeValue = "";
   block0PendingRecoveryPrompt = null;
+  logSuccess("clause mounted: " + pendingFile);
   renderBlock0Panel();
   renderInvestigationPanel();
   pulseBlock0Clause("is-goal-alert");
@@ -3550,14 +3633,14 @@ function handleBlock0ExecuteClick() {
     return;
   }
   if (!expectedAnswer || state[prefix + "PurposeValue"] !== expectedAnswer) {
-    logWarn(lifecycle.mismatchLog || "패치 검증 실패: 누락 식과 일치하지 않음");
+    logWarn(lifecycle.mismatchLog || "patch rejected: binding mismatch");
     pulseBlock0Clause("is-goal-alert");
     return;
   }
 
   if (prefix === "block1") {
     state.block1SolvedAnswers.push(expectedAnswer);
-    logSuccess("패치 검증 통과 [" + currentQuestion.id + "] " + currentQuestion.prompt);
+    logSuccess("patch committed: " + currentQuestion.id);
     if (state.block1QuestionIndex < questions.length - 1) {
       state.block1QuestionIndex += 1;
       state.block1PurposeValue = "";
@@ -3574,7 +3657,7 @@ function handleBlock0ExecuteClick() {
 
   runBlock0AnswerRecoveryPipeline(currentQuestion, function onAnswerRecovered() {
     state.block0SolvedAnswers.push(expectedAnswer);
-    logSuccess("패치 검증 통과 [" + currentQuestion.id + "] " + currentQuestion.prompt);
+    logSuccess("patch committed: " + currentQuestion.id);
 
     if (state.block0QuestionIndex < questions.length - 1) {
       var nextTargetFile = "";
@@ -3621,7 +3704,7 @@ function completeBlock1ClauseIfReady() {
   state.block1Completed = true;
   state.block1Integrity = Math.max(state.block1Integrity, 36);
   logRestored(buildRestoredStampLine());
-  logSuccess("[BLOCK1] 자기 관측 한계 복구 완료");
+  logSuccess("archive resolved: block-1");
   BLOCK1_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
@@ -3650,12 +3733,12 @@ function completeBlock0ClauseIfReady() {
   state.block0Integrity = Math.max(state.block0Integrity, 35);
 
   logRestored(buildRestoredStampLine());
-  logSuccess(lifecycle.completeSuccessLog || "패치 검증 통과: 누락 구간 복구 완료");
+  logSuccess(lifecycle.completeSuccessLog || "archive resolved: block-0");
   pulseBlock0Clause("is-goal-clear");
   BLOCK0_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
-  logSystem(BLOCK0_SPEC.memory.title + ": " + BLOCK0_SPEC.memory.text);
+  logSystem("memory segment mounted: " + BLOCK0_SPEC.memory.text);
   syncBlock0Fs();
   renderInvestigationPanel();
   if (block0Lifecycle) {

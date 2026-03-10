@@ -48,32 +48,39 @@
                 <div class="block0-status" id="block0-status">무결성 12% · 태그 0개</div>
                 <section class="workbench-action" id="block0-action-card">
                   <div class="workbench-action-head">
-                    <span class="workbench-action-kicker">현재 단계</span>
-                    <span class="workbench-action-state" id="block0-action-state">대기</span>
+                    <span class="workbench-action-kicker">REPAIR STATUS</span>
+                    <span class="workbench-action-state" id="block0-action-state">IDLE</span>
                   </div>
-                  <div class="workbench-action-title" id="block0-action-title">증거 파일을 열어 복구를 시작하세요.</div>
-                  <div class="workbench-action-body" id="block0-action-body">PREVIEW에는 문제와 증거만 남고, 이 카드가 지금 해야 할 행동을 안내합니다.</div>
-                  <button type="button" class="workbench-action-cta is-hidden" id="block0-action-button">복구 시작</button>
+                  <div class="workbench-action-title" id="block0-action-title">session idle</div>
+                  <div class="workbench-action-body" id="block0-action-body">open a source log to attach evidence.</div>
+                  <div class="workbench-action-context" id="block0-action-context">
+                    <div class="workbench-context-row"><span class="workbench-context-key">session</span><span class="workbench-context-value" id="block0-context-session">detached</span></div>
+                    <div class="workbench-context-row"><span class="workbench-context-key">source</span><span class="workbench-context-value" id="block0-context-source">none</span></div>
+                    <div class="workbench-context-row"><span class="workbench-context-key">target</span><span class="workbench-context-value" id="block0-context-target">none</span></div>
+                    <div class="workbench-context-row"><span class="workbench-context-key">required</span><span class="workbench-context-value" id="block0-context-required">none</span></div>
+                    <div class="workbench-context-row"><span class="workbench-context-key">evidence</span><span class="workbench-context-value" id="block0-context-evidence">none</span></div>
+                  </div>
+                  <button type="button" class="workbench-action-cta is-hidden" id="block0-action-button">attach repair</button>
                 </section>
                 <div class="block0-clause is-hidden" id="block0-clause-panel">
                   <div class="block0-clause-head">
-                    <div class="block0-clause-title" id="block0-clause-title">누락 구간 패치</div>
-                    <span class="block0-tag-slot block0-slot fixed block0-progress-chip" id="block0-premise-slot">패치 단계 0/4</span>
+                    <div class="block0-clause-title" id="block0-clause-title">repair clause</div>
+                    <span class="block0-tag-slot block0-slot fixed block0-progress-chip" id="block0-premise-slot">phase 0/4</span>
                   </div>
                   <div class="block0-clause-target">
                     <span class="block0-target-badge" id="block0-target-badge">식 A</span>
                     <span class="block0-target-text" id="block0-purpose-label">목적(Self) =</span>
                   </div>
                   <div class="block0-slot-line">
-                    <span class="block0-input-label">대입 조각</span>
+                    <span class="block0-input-label">binding</span>
                     <button type="button" class="block0-tag-slot block0-slot purpose expecting" id="block0-purpose-slot">[태그를 드롭]</button>
                   </div>
                 </div>
-                <div class="block0-title">추출된 조각</div>
+                <div class="block0-title">LINKED FRAGMENTS</div>
                 <div class="block0-inventory" id="block0-tag-inventory"></div>
-                <div class="block0-title">조각 조합</div>
+                <div class="block0-title">TYPE RESOLVER</div>
                 <div class="block0-fusion-dock" id="block0-fusion-dock"></div>
-                <div class="block0-title">복구 기록</div>
+                <div class="block0-title">RECOVERY TRACE</div>
                 <div class="block0-recipe-list" id="block0-recipe-list">아직 기록된 조합이 없습니다.</div>
               </section>
             </section>
@@ -170,9 +177,9 @@
 
       <section class="memory-modal is-hidden" id="block0-memory-modal" aria-live="polite">
         <div class="memory-modal-card">
-          <div class="memory-modal-title">기억 조각 발견</div>
+          <div class="memory-modal-title">MEMORY SEGMENT MOUNTED</div>
           <div class="memory-modal-text" id="block0-memory-modal-text"></div>
-          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">다음 복구 시작</button>
+          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">mount next archive</button>
         </div>
       </section>
     </div>
