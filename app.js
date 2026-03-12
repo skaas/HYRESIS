@@ -1,16 +1,43 @@
 import { GAME_CONFIG, OPENING_SEQUENCE } from "./src/config/config.js";
 import { BLOCK0_SPEC, TAG_CATEGORY_MAP, TAG_COMPOSITION_SIGNATURES } from "./src/config/block0.js";
 import { BLOCK1_SPEC } from "./src/config/block1.js";
-import { FLOW_PHASE, state, elements, setFlowPhase } from "./src/state/state.js";
+import { FLOW_PHASE, state, elements } from "./src/state/state.js";
 import {
   BLOCK0_TRANSITION_ACTION,
   createBlock0TransitionDispatcher,
 } from "./src/state/block0-transition.js";
 import {
+  RUNTIME_TRANSITION_EVENT,
+  beginAuthFlow,
+  beginInvestigationBoot,
+  beginOpeningFlow,
+  commitBlock1Answer,
+  completeBlock1Progress,
+  enqueueLogItem,
+  enterAttachingFlow,
+  enterStreamingFlow,
+  finishInvestigationBoot,
+  markBlock0DragHint,
+  pushDiscoveredRecipe,
+  resetBlock1Progress,
+  resetLogQueueState,
+  setBlock0Pipeline,
+  setInputEnabledState,
+  setInvestigationCwdState,
+  setLogPinnedState,
+  setPuzzlePurposeValue,
+  setTypingActiveState,
+  startBlock1Progress,
+  advanceBlock1Question,
+  advanceOpeningFlow,
+} from "./src/state/runtime-transitions.js";
+import { applyVisibleFilesToFs, assertVisibleFsConsistency } from "./src/state/fs-sync.js";
+import {
   getTagVisualType,
   runTypeDrivenSynthesis,
 } from "./src/game/synthesis-engine.js";
 import { renderPreviewBufferWithTagLinks as renderPreviewBuffer } from "./src/game/preview-buffer.js";
+import { createSeededRng, createSimulationEngine } from "./src/sim/engine.js";
 
 /**
  * HYRESIS FTP Gateway Runtime
@@ -70,25 +97,208 @@ var block0ActiveRecoveryFile = "";
 var block1ActiveRecoveryFile = "";
 var pinnedInvestigationPreview = null;
 var block0TransitionDispatcher = null;
+var block0DraggedRecoveryFile = "";
+var simulationEngine = null;
+var simulationSeed = (Date.now() >>> 0) || 1;
+var simulationAutoClockTimer = 0;
+var simulationAutoClockLastMs = 0;
+
+function buildSimulationSnapshot() {
+  return {
+    coordinateSystem: "filesystem paths rooted at /하이레시스; list indices are 0-based.",
+    timeMs: getSimulationNowMs(),
+    phase: state.phase,
+    inputEnabled: Boolean(state.inputEnabled),
+    openingIndex: Number(state.openingIndex || 0),
+    investigation: {
+      booting: Boolean(state.investigationBooting),
+      cwd: String(state.investigationCwd || ""),
+      previewPath: String(previewFilePath || ""),
+      previewLineCount: previewFileLines.length,
+    },
+    block0: {
+      started: Boolean(state.block0Started),
+      completed: Boolean(state.block0Completed),
+      questionIndex: Number(state.block0QuestionIndex || 0),
+      purposeValue: String(state.block0PurposeValue || ""),
+      clauseVisible: Boolean(state.block0ClauseVisible),
+      visibleFiles: Array.isArray(state.block0VisibleFiles) ? state.block0VisibleFiles.slice() : [],
+      collectedTags: Array.isArray(state.block0CollectedTags) ? state.block0CollectedTags.slice() : [],
+      solvedAnswers: Array.isArray(state.block0SolvedAnswers) ? state.block0SolvedAnswers.slice() : [],
+      pipelineStage: String(state.block0PipelineStage || ""),
+      pipelineProgress: Number(state.block0PipelineProgress || 0),
+      memoryUnlocked: Boolean(state.block0MemoryUnlocked),
+      activeRecoveryFile: String(block0ActiveRecoveryFile || ""),
+      hasPendingRecoveryPrompt: Boolean(block0PendingRecoveryPrompt),
+    },
+    block1: {
+      started: Boolean(state.block1Started),
+      completed: Boolean(state.block1Completed),
+      questionIndex: Number(state.block1QuestionIndex || 0),
+      purposeValue: String(state.block1PurposeValue || ""),
+      clauseVisible: Boolean(state.block1ClauseVisible),
+      visibleFiles: Array.isArray(state.block1VisibleFiles) ? state.block1VisibleFiles.slice() : [],
+      collectedTags: Array.isArray(state.block1CollectedTags) ? state.block1CollectedTags.slice() : [],
+      solvedAnswers: Array.isArray(state.block1SolvedAnswers) ? state.block1SolvedAnswers.slice() : [],
+      activeRecoveryFile: String(block1ActiveRecoveryFile || ""),
+    },
+    transfer: {
+      activeJob: Number(fileTransferJob || 0),
+      readonlyLock: Boolean(investigationReadOnlyLock),
+    },
+    log: {
+      queueLength: Array.isArray(state.logQueue) ? state.logQueue.length : 0,
+      typingActive: Boolean(state.typingActive),
+      pinnedToBottom: Boolean(state.logPinnedToBottom),
+      summaryCount: terminalSummaryLines.length,
+    },
+  };
+}
+
+function ensureStateEventBuffer() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  if (!Array.isArray(window.__HYRESIS_STATE_EVENTS)) {
+    window.__HYRESIS_STATE_EVENTS = [];
+  }
+  return window.__HYRESIS_STATE_EVENTS;
+}
+
+function flushSimulationEventsToObservers() {
+  if (!simulationEngine) {
+    return;
+  }
+  var events = simulationEngine.drainEvents();
+  var buffer = ensureStateEventBuffer();
+  events.forEach(function publishEvent(event) {
+    buffer.push(event);
+    if (typeof document !== "undefined" && typeof CustomEvent === "function") {
+      document.dispatchEvent(
+        new CustomEvent("hyresis:state-transition", {
+          detail: event,
+        }),
+      );
+    }
+  });
+}
+
+function ensureSimulationEngine() {
+  if (simulationEngine) {
+    return simulationEngine;
+  }
+  simulationEngine = createSimulationEngine({
+    initialState: state,
+    nowMs: Date.now(),
+    rng: createSeededRng(simulationSeed),
+    snapshotBuilder: buildSimulationSnapshot,
+  });
+  return simulationEngine;
+}
+
+function startSimulationAutoClock() {
+  if (typeof window === "undefined" || simulationAutoClockTimer) {
+    return;
+  }
+  if (window.__HYRESIS_DISABLE_AUTO_CLOCK) {
+    return;
+  }
+  simulationAutoClockLastMs = Date.now();
+  simulationAutoClockTimer = window.setInterval(function runSimulationClock() {
+    var nowMs = Date.now();
+    var elapsed = Math.max(1, nowMs - simulationAutoClockLastMs);
+    simulationAutoClockLastMs = nowMs;
+    ensureSimulationEngine().advanceTime(elapsed);
+    flushSimulationEventsToObservers();
+  }, 16);
+}
+
+function stopSimulationAutoClock() {
+  if (typeof window === "undefined" || !simulationAutoClockTimer) {
+    return;
+  }
+  window.clearInterval(simulationAutoClockTimer);
+  simulationAutoClockTimer = 0;
+}
+
+function installSimulationTestHooks() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  ensureStateEventBuffer();
+  window.advanceTime = function advanceTime(ms) {
+    stopSimulationAutoClock();
+    ensureSimulationEngine().advanceTime(ms);
+    flushSimulationEventsToObservers();
+    return ensureSimulationEngine().getSnapshot();
+  };
+  window.render_game_to_text = function renderGameToText() {
+    return JSON.stringify(ensureSimulationEngine().getSnapshot());
+  };
+}
+
+function getSimulationNowMs() {
+  if (!simulationEngine) {
+    return Date.now();
+  }
+  return simulationEngine.nowMs();
+}
+
+function getSimulationDate(dateValue) {
+  if (dateValue instanceof Date) {
+    return dateValue;
+  }
+  if (Number.isFinite(dateValue)) {
+    return new Date(Number(dateValue));
+  }
+  return new Date(getSimulationNowMs());
+}
+
+function getSimulationRandomInt(minInclusive, maxInclusive) {
+  var min = Number(minInclusive) || 0;
+  var max = Number(maxInclusive) || min;
+  var span = Math.max(1, max - min + 1);
+  return min + Math.floor(ensureSimulationEngine().random() * span);
+}
+
+function scheduleRuntimeTimeout(callback, delayMs, label) {
+  return ensureSimulationEngine().scheduleTimeout(callback, Math.max(0, Number(delayMs) || 0), {
+    label: label || "",
+  });
+}
+
+function scheduleRuntimeInterval(callback, intervalMs, label) {
+  return ensureSimulationEngine().scheduleInterval(callback, Math.max(1, Number(intervalMs) || 1), {
+    label: label || "",
+  });
+}
+
+function clearRuntimeTimer(timerId) {
+  if (timerId === null || timerId === undefined) {
+    return;
+  }
+  ensureSimulationEngine().clearScheduled(timerId);
+}
 
 /** Block0 관측 이벤트를 안정 스냅샷으로 방출한다. */
-function emitStateEvent(name, snapshot) {
-  var payload = {
+function emitStateEvent(name, snapshot, payload) {
+  var eventPayload = {
     name: String(name || ""),
-    snapshot: Object.assign({}, snapshot || {}),
+    payload: Object.assign({}, payload || {}),
+    snapshot: Object.assign({}, snapshot || buildSimulationSnapshot()),
   };
 
-  if (typeof window !== "undefined") {
-    if (!Array.isArray(window.__HYRESIS_STATE_EVENTS)) {
-      window.__HYRESIS_STATE_EVENTS = [];
-    }
-    window.__HYRESIS_STATE_EVENTS.push(payload);
+  if (simulationEngine) {
+    simulationEngine.emitEvent(eventPayload.name, eventPayload.payload, eventPayload.snapshot);
+    flushSimulationEventsToObservers();
+    return;
   }
 
+  ensureStateEventBuffer().push(eventPayload);
   if (typeof document !== "undefined" && typeof CustomEvent === "function") {
     document.dispatchEvent(
       new CustomEvent("hyresis:state-transition", {
-        detail: payload,
+        detail: eventPayload,
       }),
     );
   }
@@ -228,7 +438,7 @@ function prependRecoveredFile(list, fileName) {
 
 /** 파일 패널 표시에 쓰는 YY-MM-DD / HH:MM 스탬프를 만든다. */
 function buildCurrentFsStamp(dateValue) {
-  var date = dateValue instanceof Date ? dateValue : new Date();
+  var date = getSimulationDate(dateValue);
   return {
     date: padTwoDigits(date.getFullYear() % 100) + "-" + padTwoDigits(date.getMonth() + 1) + "-" + padTwoDigits(date.getDate()),
     time: padTwoDigits(date.getHours()) + ":" + padTwoDigits(date.getMinutes()),
@@ -258,7 +468,7 @@ function stampBlock1RecoveredFile(fileName, dateValue) {
 /** 예약된 블록 타이머를 정리한다. */
 function clearBlockLifecycleTimers() {
   while (blockLifecycleTimers.length > 0) {
-    clearTimeout(blockLifecycleTimers.pop());
+    clearRuntimeTimer(blockLifecycleTimers.pop());
   }
 }
 
@@ -273,14 +483,14 @@ function queueRecoveryShellDigest(text) {
   if (recoveryShellDigestTimer) {
     return;
   }
-  recoveryShellDigestTimer = setTimeout(flushRecoveryShellDigest, 1500);
+  recoveryShellDigestTimer = scheduleRuntimeTimeout(flushRecoveryShellDigest, 1500, "recovery-shell-digest");
 }
 
 function flushRecoveryShellDigest() {
   var summary = "";
   var hiddenCount = 0;
   if (recoveryShellDigestTimer) {
-    clearTimeout(recoveryShellDigestTimer);
+    clearRuntimeTimer(recoveryShellDigestTimer);
     recoveryShellDigestTimer = 0;
   }
   if (recoveryShellDigestQueue.length === 0) {
@@ -308,7 +518,7 @@ function logRecoveryEvent(text, tone) {
 }
 
 function scheduleBlockLifecycleTimer(callback, delayMs) {
-  var timer = setTimeout(callback, Math.max(0, Number(delayMs) || 0));
+  var timer = scheduleRuntimeTimeout(callback, Math.max(0, Number(delayMs) || 0), "block-lifecycle");
   blockLifecycleTimers.push(timer);
   return timer;
 }
@@ -583,56 +793,12 @@ function buildBlock0HintPanelHtml() {
   );
 }
 
-function getBlock0StageHintText() {
-  var question = getBlock0CurrentQuestion();
-  if (!question) {
-    return "현재 단계의 증거를 다시 확인하세요.";
-  }
-  if (question.id === "Q0-2") {
-    return "대상이 인간이면 비해침 대상도 인간이어야 합니다.";
-  }
-  if (question.id === "Q0-3") {
-    return "설계식은 필수보존(비해침)으로 닫힙니다.";
-  }
-  if (question.id === "Q0-4") {
-    return "앞 단계 결과를 재사용하면 마지막 식이 닫힙니다.";
-  }
-  return "현재 단계의 증거를 다시 확인하세요.";
-}
-
 function clearPuzzleIdleHint() {
-  var hadIdleHint = state.block0IdleHintActive || state.block1IdleHintActive;
-  state.block0IdleHintActive = false;
-  state.block1IdleHintActive = false;
-  if (state.block0IdleHintTimer) {
-    clearTimeout(state.block0IdleHintTimer);
-    state.block0IdleHintTimer = 0;
-  }
-  return hadIdleHint;
+  return false;
 }
 
 function touchPuzzleActivity(prefix) {
-  var activePrefix = prefix || getActivePuzzlePrefix();
-  var hadIdleHint = clearPuzzleIdleHint();
-  if (state[activePrefix + "Completed"] || state.phase !== FLOW_PHASE.STREAMING) {
-    if (hadIdleHint) {
-      renderBlock0Panel();
-    }
-    return;
-  }
-
-  state.block0IdleHintTimer = setTimeout(function onPuzzleIdleHint() {
-    if (state.phase !== FLOW_PHASE.STREAMING || state[activePrefix + "Completed"]) {
-      return;
-    }
-    state.block0IdleHintActive = activePrefix === "block0";
-    state.block1IdleHintActive = activePrefix === "block1";
-    renderBlock0Panel();
-  }, BLOCK0_SPEC.hintDelayMs);
-
-  if (hadIdleHint) {
-    renderBlock0Panel();
-  }
+  void prefix;
 }
 
 function getQuestionUiText(question, key) {
@@ -643,8 +809,11 @@ function getQuestionUiText(question, key) {
 }
 
 function setBlock0PipelineStage(stage, progress) {
-  state.block0PipelineStage = String(stage || "");
-  state.block0PipelineProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+  setBlock0Pipeline(state, stage, progress);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.PIPELINE_UPDATED, null, {
+    stage: String(stage || ""),
+    progress: Math.max(0, Math.min(1, Number(progress) || 0)),
+  });
 }
 
 function hasOpenPuzzlePreview(prefix) {
@@ -655,17 +824,12 @@ function hasOpenPuzzlePreview(prefix) {
 function buildWorkbenchActionViewModel(prefix) {
   var spec = getPuzzleSpec(prefix);
   var currentQuestion = getPuzzleCurrentQuestion(prefix);
-  var previousQuestion = getPuzzlePreviousQuestion(prefix);
   var currentAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
   var currentPurpose = state[prefix + "PurposeValue"] || "";
   var collectedTags = state[prefix + "CollectedTags"];
   var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var hasOpenPreview = hasOpenPuzzlePreview(prefix);
-  var isIdleHintActive = Boolean(state[prefix + "IdleHintActive"]);
   var questionTitle = activeRecoveryFile ? ("목표: " + currentQuestion.prompt) : ("대상 준비: " + (spec.title || "복구 단계"));
-  var questionActionText = getQuestionUiText(currentQuestion, "actionText");
-  var idleActionText = getQuestionUiText(currentQuestion, "idleText");
-  var resolvedActionText = getQuestionUiText(previousQuestion, "resolvedText");
   var block0TargetFile = getBlock0CurrentTargetFileName();
   var block0Rule = getBlock0UnlockRuleByFile(block0TargetFile);
   var block0Requirement = block0Rule ? String(block0Rule.whenTag || "") : "";
@@ -693,22 +857,6 @@ function buildWorkbenchActionViewModel(prefix) {
       isHidden: false,
       ctaLabel: "",
       ctaAction: "",
-    };
-  }
-
-  if (prefix === "block0" && block0PendingRecoveryPrompt) {
-    var pendingTag = block0PendingRecoveryPrompt.requiredTag || "조건 확인 필요";
-    var pendingQuestion = block0PendingRecoveryPrompt.questionText || "질문 정보를 불러오는 중입니다.";
-    return {
-      toneClass: "is-ready",
-      stateLabel: "준비",
-      title: pendingQuestion,
-      body: "필요 조각: " + pendingTag,
-      progressLabel: "",
-      progressValue: 0,
-      isHidden: false,
-      ctaLabel: "복구 연결",
-      ctaAction: "start-recovery",
     };
   }
 
@@ -757,10 +905,10 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!state[prefix + "ClauseVisible"]) {
     if (prefix === "block0" && block0TargetReady) {
       return {
-        toneClass: "is-ready",
-        stateLabel: "완료",
-        title: "복구 완료",
-        body: resolvedActionText || ((block0TargetFile || "다음 파일") + " 파일을 확인해주세요."),
+        toneClass: "",
+        stateLabel: "마운트",
+        title: "복구 가능 파일을 작업대로 가져오세요.",
+        body: "",
         progressLabel: "",
         progressValue: 0,
         isHidden: false,
@@ -772,8 +920,8 @@ function buildWorkbenchActionViewModel(prefix) {
       return {
         toneClass: "",
         stateLabel: "탐색",
-        title: "잠금 조건 확인",
-        body: block0Requirement ? ("필요 조각: " + block0Requirement) : "증거에서 필요한 조각을 찾으세요.",
+        title: "증거를 확인해 복구 파일을 준비하세요.",
+        body: block0Requirement ? ("잠금 조건 조각: " + block0Requirement) : "",
         progressLabel: "",
         progressValue: 0,
         isHidden: false,
@@ -784,8 +932,8 @@ function buildWorkbenchActionViewModel(prefix) {
     return {
       toneClass: "",
       stateLabel: "대기",
-      title: "증거 파일 열기",
-      body: prefix === "block0" ? "부팅.log를 열어 첫 조각을 확인하세요." : "열린 로그를 확인해 복구를 이어가세요.",
+      title: "증거를 확인해 복구 파일을 준비하세요.",
+      body: "",
       progressLabel: "",
       progressValue: 0,
       isHidden: false,
@@ -851,15 +999,13 @@ function buildWorkbenchActionViewModel(prefix) {
   }
 
   return {
-    toneClass: isIdleHintActive ? "is-ready" : "",
-    stateLabel: isIdleHintActive ? "힌트" : "연결",
-    title: isIdleHintActive ? currentQuestion.prompt : questionTitle,
-    body: isIdleHintActive
-      ? ((idleActionText || getBlock0StageHintText()))
-      : "",
+    toneClass: "",
+    stateLabel: "연결",
+    title: questionTitle,
+    body: "",
     progressLabel: "",
     progressValue: 0,
-    isHidden: !isIdleHintActive,
+    isHidden: true,
     ctaLabel: "",
     ctaAction: "",
   };
@@ -1382,7 +1528,6 @@ function setupBlockLifecycles() {
       state.block0SolvedAnswers = [];
       state.block0MemoryUnlocked = false;
       state.block0DragHintShown = false;
-      state.block0IdleHintActive = false;
       state.block0DiscoveredRecipes = [];
       block0RecoveryMetaByFile = {};
       block0RecoveryRootMeta = null;
@@ -1395,6 +1540,7 @@ function setupBlockLifecycles() {
 
       if (!state.block0Started && startFile && path === startFile.path) {
         state.block0Started = true;
+        emitStateEvent("block0.started");
         (lifecycle.startLogs || []).forEach(function writeStartLog(entry) {
           appendLogLine(String(entry.text || ""), entry.tone || "log-muted");
         });
@@ -1409,46 +1555,28 @@ function setupBlockLifecycles() {
 
   block1Lifecycle = runBlockLifecycle(BLOCK1_SPEC, {
     reset: function resetBlock1(spec) {
-      state.block1Started = false;
-      state.block1VisibleFiles = [];
-      state.block1Completed = false;
-      state.block1Integrity = spec.initialIntegrity || 18;
-      state.block1CollectedTags = [];
-      state.block1ClauseVisible = false;
-      state.block1PurposeValue = "";
-      state.block1QuestionIndex = 0;
-      state.block1SolvedAnswers = [];
-      state.block1IdleHintActive = false;
-      state.block1DiscoveredRecipes = [];
+      resetBlock1Progress(state, spec.initialIntegrity || 18);
       block1RecoveryMetaByFile = {};
       block1RecoveryRootMeta = null;
       block1ActiveRecoveryFile = "";
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_RESET);
     },
     start: function startBlock1Lifecycle(spec) {
       var lifecycle = spec.lifecycle || {};
       var fileNames = Object.keys(spec.files);
 
       clearBlockLifecycleTimers();
-      state.block1Started = true;
-      state.block1VisibleFiles = [];
-      state.block1Completed = false;
-      state.block1Integrity = spec.initialIntegrity || state.block1Integrity || 18;
-      state.block1CollectedTags = [];
-      state.block1ClauseVisible = true;
-      state.block1PurposeValue = "";
-      state.block1QuestionIndex = 0;
-      state.block1SolvedAnswers = [];
-      state.block1IdleHintActive = false;
-      state.block1DiscoveredRecipes = [];
+      startBlock1Progress(state, spec.initialIntegrity || state.block1Integrity || 18);
       block1ActiveRecoveryFile = "";
       syncBlock1Fs();
 
-      state.investigationCwd = spec.rootPath;
+      setInvestigationCwdState(state, spec.rootPath);
       setTerminalPathbar(state.investigationCwd);
       renderInvestigationPanel(lifecycle.startPanelMessage || "복구 블록 시작");
       clearInvestigationRowStates();
       setBlock0MemoryModalVisible(false);
       renderBlock0Panel();
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_STARTED);
 
       logRestored(buildRestoredStampLine());
       (lifecycle.startLogs || []).forEach(function writeStartLog(entry) {
@@ -1456,7 +1584,7 @@ function setupBlockLifecycles() {
       });
 
       (lifecycle.timedUnlocks || []).forEach(function scheduleUnlock(unlockSpec) {
-        var timer = setTimeout(function unlockByTimer() {
+        var timer = scheduleRuntimeTimeout(function unlockByTimer() {
           var targetName = fileNames[unlockSpec.fileOrder || 0] || "";
           if (!state.block1Started || !targetName || state.block1VisibleFiles.indexOf(targetName) !== -1) {
             return;
@@ -1467,6 +1595,7 @@ function setupBlockLifecycles() {
           renderInvestigationPanel(formatLifecycleText(unlockSpec.panelMessageTemplate || "", { file: targetName }));
           renderBlock0Panel();
           logRecoveryEvent(formatLifecycleText(unlockSpec.logTemplate || "", { file: targetName }), unlockSpec.tone || "log-muted");
+          emitStateEvent("block1.file_unlocked", null, { fileName: targetName, mode: "timed" });
         }, Math.max(0, Number(unlockSpec.delayMs) || 0));
         blockLifecycleTimers.push(timer);
       });
@@ -1503,6 +1632,7 @@ function setupBlockLifecycles() {
       renderInvestigationPanel(formatLifecycleText(onOpenUnlock.panelMessageTemplate || "", { file: nextName }));
       renderBlock0Panel();
       logRecoveryEvent(formatLifecycleText(onOpenUnlock.logTemplate || "", { file: nextName }), onOpenUnlock.tone || "log-muted");
+      emitStateEvent("block1.file_unlocked", null, { fileName: nextName, mode: "on-open" });
     },
   });
 }
@@ -1512,7 +1642,6 @@ function syncBlock0Fs() {
   var root = BLOCK0_SPEC.rootPath;
   var visible = state.block0VisibleFiles.slice();
   var visibleNames = visible.filter(function onlyFileName(name) { return name !== "block-1"; });
-  var index = 0;
   var rootStamp = block0RecoveryRootMeta || buildCurrentFsStamp();
 
   if (!LOG_FS["/하이레시스"]) {
@@ -1525,28 +1654,27 @@ function syncBlock0Fs() {
   if ((state.block1Started || state.block0MemoryUnlocked) && visible.indexOf("block-1") === -1) {
     visible.push("block-1");
   }
-  LOG_FS[root] = { type: "dir", children: visible };
-  LOG_META[root] = { date: rootStamp.date, time: rootStamp.time, attr: "DIR,RO" };
-
-  while (index < visibleNames.length) {
-    var fileName = visibleNames[index];
-    var fileSpec = BLOCK0_SPEC.files[fileName];
-    var recoveredStamp = block0RecoveryMetaByFile[fileName];
-    var fallbackMeta = LOG_META[fileSpec.path] || {};
-    var stamp = recoveredStamp || {
-      date: fallbackMeta.date || rootStamp.date,
-      time: fallbackMeta.time || rootStamp.time,
-    };
-
-    LOG_FS[fileSpec.path] = { type: "file", content: fileSpec.lines.slice() };
-    LOG_META[fileSpec.path] = {
-      size: Math.max(320, fileSpec.lines.join("\n").length * 2),
-      date: stamp.date,
-      time: stamp.time,
-      attr: "RO,LOG",
-    };
-    index += 1;
-  }
+  applyVisibleFilesToFs({
+    fs: LOG_FS,
+    meta: LOG_META,
+    rootPath: root,
+    visibleFiles: visible,
+    fileSpecs: BLOCK0_SPEC.files,
+    recoveryMetaByFile: block0RecoveryMetaByFile,
+    rootStamp: rootStamp,
+  });
+  assertVisibleFsConsistency({
+    fs: LOG_FS,
+    meta: LOG_META,
+    rootPath: root,
+    visibleFiles: visibleNames,
+    fileSpecs: BLOCK0_SPEC.files,
+  });
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.FS_SYNCED, null, {
+    rootPath: root,
+    visibleCount: visibleNames.length,
+    prefix: "block0",
+  });
 }
 
 /** 블록 0 런타임 상태를 초기값으로 재설정한다. */
@@ -1561,6 +1689,7 @@ function resetBlock0State() {
   block0CurrentContext.file = "";
   block0CurrentContext.tag = "";
   block0PendingRecoveryPrompt = null;
+  block0DraggedRecoveryFile = "";
   block0ActiveRecoveryFile = "";
   block0DraggedTag = "";
   block0DraggedTagIndex = -1;
@@ -1587,7 +1716,6 @@ function resetBlock1State() {
 function syncBlock1Fs() {
   var root = BLOCK1_SPEC.rootPath;
   var visible = state.block1VisibleFiles.slice();
-  var index = 0;
   var parentEntry = LOG_FS[BLOCK0_SPEC.rootPath];
   var rootStamp = block1RecoveryRootMeta || buildCurrentFsStamp();
 
@@ -1598,40 +1726,42 @@ function syncBlock1Fs() {
     parentEntry.children.push("block-1");
   }
 
-  LOG_FS[root] = { type: "dir", children: visible };
-  LOG_META[root] = { date: rootStamp.date, time: rootStamp.time, attr: "DIR,RO" };
-
-  while (index < visible.length) {
-    var fileName = visible[index];
-    var fileSpec = BLOCK1_SPEC.files[fileName];
-    var recoveredStamp = block1RecoveryMetaByFile[fileName];
-    var fallbackMeta = LOG_META[fileSpec.path] || {};
-    var stamp = recoveredStamp || {
-      date: fallbackMeta.date || rootStamp.date,
-      time: fallbackMeta.time || rootStamp.time,
-    };
-
-    LOG_FS[fileSpec.path] = { type: "file", content: fileSpec.lines.slice() };
-    LOG_META[fileSpec.path] = {
-      size: Math.max(320, fileSpec.lines.join("\n").length * 2),
-      date: stamp.date,
-      time: stamp.time,
-      attr: "RO,LOG",
-    };
-    index += 1;
-  }
+  applyVisibleFilesToFs({
+    fs: LOG_FS,
+    meta: LOG_META,
+    rootPath: root,
+    visibleFiles: visible,
+    fileSpecs: BLOCK1_SPEC.files,
+    recoveryMetaByFile: block1RecoveryMetaByFile,
+    rootStamp: rootStamp,
+  });
+  assertVisibleFsConsistency({
+    fs: LOG_FS,
+    meta: LOG_META,
+    rootPath: root,
+    visibleFiles: visible,
+    fileSpecs: BLOCK1_SPEC.files,
+  });
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.FS_SYNCED, null, {
+    rootPath: root,
+    visibleCount: visible.length,
+    prefix: "block1",
+  });
 }
 
 // ----- 입력/초기화 이벤트 -----
 
 /** DOM이 준비되면 요소 캐싱, 이벤트 바인딩, 시작 시퀀스를 초기화한다. */
 function handleDomContentLoaded() {
+  ensureSimulationEngine();
+  installSimulationTestHooks();
   cacheElements();
   setTerminalLogExpanded(false);
   refreshTerminalSummaryText();
   resetBlock0State();
   configureShellMode();
   bindInputEvents();
+  startSimulationAutoClock();
   startFtpLinkTicker();
   startOpeningSequence();
 }
@@ -1683,6 +1813,8 @@ function cacheElements() {
   elements.block0TargetBadge = document.getElementById("block0-target-badge");
   elements.block0PurposeLabel = document.getElementById("block0-purpose-label");
   elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
+  elements.block0HintTitle = document.getElementById("block0-hint-title");
+  elements.block0HintGuide = document.getElementById("block0-hint-guide");
   elements.block0MemoryModal = document.getElementById("block0-memory-modal");
   elements.block0MemoryModalText = document.getElementById("block0-memory-modal-text");
   elements.block0MemoryModalNext = document.getElementById("block0-memory-modal-next");
@@ -1693,6 +1825,8 @@ function cacheElements() {
 function bindInputEvents() {
   if (elements.investigationList) {
     elements.investigationList.addEventListener("click", handleInvestigationItemClick);
+    elements.investigationList.addEventListener("dragstart", handleInvestigationItemDragStart);
+    elements.investigationList.addEventListener("dragend", handleInvestigationItemDragEnd);
   }
   if (elements.investigationContent) {
     elements.investigationContent.addEventListener("click", handleInvestigationPreviewClick);
@@ -1702,8 +1836,11 @@ function bindInputEvents() {
     elements.block0PurposeSlot.addEventListener("dragover", handleBlock0PurposeSlotDragOver);
     elements.block0PurposeSlot.addEventListener("drop", handleBlock0PurposeSlotDrop);
   }
-  if (elements.block0ActionButton) {
-    elements.block0ActionButton.addEventListener("click", handleWorkbenchActionButtonClick);
+  if (elements.block0ActionCard) {
+    elements.block0ActionCard.addEventListener("dragenter", handleWorkbenchRecoveryDragEnter);
+    elements.block0ActionCard.addEventListener("dragover", handleWorkbenchRecoveryDragOver);
+    elements.block0ActionCard.addEventListener("dragleave", handleWorkbenchRecoveryDragLeave);
+    elements.block0ActionCard.addEventListener("drop", handleWorkbenchRecoveryDrop);
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.addEventListener("dragstart", handleBlock0InventoryDragStart);
@@ -1734,8 +1871,8 @@ function bindInputEvents() {
 
 /** 부팅 시퀀스 시작: UI를 분리 상태로 놓고 시스템 오버레이를 활성화한다. */
 function startOpeningSequence() {
-  setFlowPhase(FLOW_PHASE.BOOTING);
-  state.openingIndex = 0;
+  beginOpeningFlow(state);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.FLOW_BOOTING);
   setTerminalConnected(false);
   setInvestigationPanelVisible(true);
   setTerminalPathbar(state.investigationCwd);
@@ -1758,22 +1895,23 @@ function scheduleNextOpeningLine() {
   }
 
   appendBootLine(openingLine.text);
-  state.openingIndex += 1;
-  setTimeout(scheduleNextOpeningLine, openingLine.delay);
+  advanceOpeningFlow(state);
+  scheduleRuntimeTimeout(scheduleNextOpeningLine, openingLine.delay, "opening-line");
 }
 
 /** 부팅 완료 후 접근 동의 게이트로 자연스럽게 전환한다. */
 function finishOpeningSequence() {
   setSystemStatus("BOOT COMPLETE");
-  setTimeout(function openLoginAfterBoot() {
+  scheduleRuntimeTimeout(function openLoginAfterBoot() {
     setSystemOverlayVisible(false);
     beginFtpAuthFlow();
-  }, 260);
+  }, 260, "opening-finish");
 }
 
 /** 접근 동의 카드 초기화 및 입력 포커스 이동. */
 function beginFtpAuthFlow() {
-  setFlowPhase(FLOW_PHASE.LOGIN_REQUIRED);
+  beginAuthFlow(state);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.FLOW_LOGIN_REQUIRED);
   setInputEnabled(false);
   setTerminalConnected(false);
   setAuthOverlayVisible(true);
@@ -1811,51 +1949,61 @@ function handleAuthFormSubmit(submitEvent) {
   if (!consentText) {
     setAuthCardMode("is-error");
     setAuthStatus("확인 문구 필요");
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_ERROR, null, {
+      reason: "missing-consent-text",
+    });
     if (elements.authError) {
       elements.authError.textContent = "'동의합니다.'를 입력해주세요.";
     }
-    setTimeout(function resetAuthPrompt() {
+    scheduleRuntimeTimeout(function resetAuthPrompt() {
       setAuthCardMode("");
       setAuthStatus("열람 동의 대기");
-    }, 260);
+    }, 260, "auth-reset-prompt");
     return;
   }
 
   if (normalizedConsent !== requiredConsent) {
     setAuthCardMode("is-error");
     setAuthStatus("동의 필요");
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_ERROR, null, {
+      reason: "mismatch-consent-text",
+    });
     if (elements.authError) {
       elements.authError.textContent = "확인 문구가 정확하지 않습니다. '동의합니다.'를 그대로 입력해주세요.";
     }
-    setTimeout(function resetAuthConsentPrompt() {
+    scheduleRuntimeTimeout(function resetAuthConsentPrompt() {
       setAuthCardMode("");
       setAuthStatus("열람 동의 대기");
-    }, 260);
+    }, 260, "auth-reset-consent");
     return;
   }
 
   setAuthCardMode("is-connecting");
   setAuthStatus("동의 확인 중");
   setAuthFormEnabled(false);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_CONNECTING);
 
-  setTimeout(function completeConsentSuccess() {
-    setFlowPhase(FLOW_PHASE.ATTACHING);
+  scheduleRuntimeTimeout(function completeConsentSuccess() {
+    enterAttachingFlow(state);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.FLOW_ATTACHING);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_SUCCESS);
     setAuthCardMode("is-success");
     setAuthStatus("세션 연결됨");
     logSuccess("열람 동의 확인");
 
-    setTimeout(function attachStage() {
+    scheduleRuntimeTimeout(function attachStage() {
       setAuthStatus("터미널 연결 중");
       logSystem("열람 세션 연결 중...");
-    }, 180);
+    }, 180, "auth-attach-stage");
 
-    setTimeout(function enterFtpSession() {
+    scheduleRuntimeTimeout(function enterFtpSession() {
       setAuthOverlayVisible(false);
       setTerminalConnected(true);
-      setFlowPhase(FLOW_PHASE.STREAMING);
+      enterStreamingFlow(state);
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.FLOW_STREAMING);
       startInvestigationMode();
-    }, 460);
-  }, 420);
+    }, 460, "auth-enter-session");
+  }, 420, "auth-success");
 }
 
 /** 접근 동의 오버레이 표시/숨김. */
@@ -1909,8 +2057,8 @@ function startInvestigationMode() {
   ];
   var index = 0;
 
-  state.investigationBooting = true;
-  state.investigationCwd = BLOCK0_SPEC.rootPath;
+  beginInvestigationBoot(state, BLOCK0_SPEC.rootPath);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.INVESTIGATION_BOOTING);
   setInputEnabled(false);
   setTerminalPathbar(state.investigationCwd);
   setInvestigationPanelVisible(true);
@@ -1923,7 +2071,8 @@ function startInvestigationMode() {
   function streamNextIntroLine() {
     var line = introLines[index];
     if (!line) {
-      state.investigationBooting = false;
+      finishInvestigationBoot(state);
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.INVESTIGATION_READY);
       setInputEnabled(false);
       touchPuzzleActivity("block0");
       renderBlock0Panel();
@@ -1932,10 +2081,10 @@ function startInvestigationMode() {
 
     appendLogLine(line.text, line.tone);
     index += 1;
-    setTimeout(streamNextIntroLine, 140);
+    scheduleRuntimeTimeout(streamNextIntroLine, 140, "investigation-intro");
   }
 
-  setTimeout(streamNextIntroLine, 120);
+  scheduleRuntimeTimeout(streamNextIntroLine, 120, "investigation-intro-start");
 }
 
 // ----- 연결 상태/공통 UI 토글 -----
@@ -1946,7 +2095,7 @@ function updateFtpLinkChip() {
     return;
   }
 
-  var latency = 70 + Math.floor(Math.random() * 71);
+  var latency = getSimulationRandomInt(70, 140);
   elements.investigationLinkChip.textContent = "LINK: SECURE/" + latency + "ms";
 }
 
@@ -1956,7 +2105,7 @@ function startFtpLinkTicker() {
     return;
   }
   updateFtpLinkChip();
-  ftpLinkTimer = setInterval(updateFtpLinkChip, 1200);
+  ftpLinkTimer = scheduleRuntimeInterval(updateFtpLinkChip, 1200, "ftp-link-chip");
 }
 
 /** 좌측 탐색 패널 표시 상태 제어. */
@@ -2108,7 +2257,7 @@ function handleTerminalLogToggleClick() {
 
 /** 내러티브 shell 입력 상태 플래그를 갱신한다. */
 function setInputEnabled(enabled) {
-  state.inputEnabled = enabled;
+  setInputEnabledState(state, enabled);
 }
 
 /** 시스템 부팅 오버레이 표시 상태 제어. */
@@ -2290,9 +2439,6 @@ function buildInvestigationRowButton(options) {
   if (meta.recovered) {
     button.classList.add("item-recovered");
   }
-  if (meta.armed) {
-    button.classList.add("item-armed");
-  }
   if (meta.mounted) {
     button.classList.add("item-mounted");
   }
@@ -2302,6 +2448,8 @@ function buildInvestigationRowButton(options) {
   button.dataset.recoveryState = meta.recoverable ? "recoverable" : (meta.blocked ? "blocked" : "none");
   button.dataset.requiredTag = meta.requiredTag ? String(meta.requiredTag) : "";
   button.dataset.requiredFile = meta.requiredFile ? String(meta.requiredFile) : "";
+  button.dataset.draggableRecovery = meta.recoverable ? "true" : "false";
+  button.draggable = Boolean(meta.recoverable);
 
   nameCell.className = "investigation-cell col-name";
   nameCell.textContent = options && options.name ? options.name : "";
@@ -2390,14 +2538,10 @@ function getFsChildrenRows(cwd, entry) {
         meta: {
           date: "--.--.--",
           time: "--:--",
-          attr:
-            (isRecoverable ? "LOCK,READY" : "LOCK,BLOCKED") +
-            (block0PendingRecoveryPrompt && block0PendingRecoveryPrompt.fileName === hiddenName ? ",ARMED" : "") +
-            (block0ActiveRecoveryFile === hiddenName ? ",MOUNTED" : ""),
+          attr: (isRecoverable ? "LOCK,READY" : "LOCK,BLOCKED") + (block0ActiveRecoveryFile === hiddenName ? ",MOUNTED" : ""),
           locked: true,
           recoverable: isRecoverable,
           blocked: !isRecoverable,
-          armed: Boolean(block0PendingRecoveryPrompt) && block0PendingRecoveryPrompt.fileName === hiddenName,
           mounted: block0ActiveRecoveryFile === hiddenName,
           requiredTag: isRecoverable ? currentRequirementTag : "",
           requiredFile: !isRecoverable ? questionTargetFile : "",
@@ -2482,16 +2626,6 @@ function pinTextPreview(text) {
     text: text || DEFAULT_PREVIEW_HINT,
   };
   renderPinnedInvestigationPreview();
-}
-
-/** 복구 가능 잠금 파일 선택 시 WORKBENCH에 표시할 문제/조건만 보관한다. */
-function renderRecoverablePreviewPrompt(fileName, requiredTag) {
-  var safeFileName = String(fileName || "대상 파일");
-  var safeTag = String(requiredTag || "");
-  var currentQuestion = getBlock0CurrentQuestion();
-  var questionText = currentQuestion ? String(currentQuestion.prompt || "") : "";
-
-  armBlock0Recovery(safeFileName, safeTag, questionText);
 }
 
 /** PREVIEW BUFFER 로그 라인을 태그 링크 포함 형태로 렌더링한다. */
@@ -2720,24 +2854,18 @@ function handleInvestigationItemClick(clickEvent) {
   if (isLocked) {
     markInvestigationRowLoading(target, false);
     if (recoveryState === "recoverable") {
-      renderRecoverablePreviewPrompt(fileName, requiredTag);
-      logSuccess("복구 대상 준비: " + fileName);
-      renderBlock0Panel();
-      renderInvestigationPanel();
-      touchPuzzleActivity("block0");
       return;
     }
     clearBlock0RecoveryArm();
-    pinTextPreview(
-      "[LOCK BLOCKED] " + fileName + "\nrequired restore: " + (requiredFile || "previous entry"),
-    );
-    renderBlock0Panel();
+    block0DraggedRecoveryFile = "";
+    logWarn("복구 불가: " + (requiredFile || "선행 조각") + " 확인 필요");
     return;
   }
   markInvestigationRowLoading(target, kind === "file");
 
   if (kind === "dir") {
     clearBlock0RecoveryArm();
+    block0DraggedRecoveryFile = "";
     if (normalizePath(path) === BLOCK1_SPEC.rootPath && state.block0MemoryUnlocked && !state.block1Started) {
       startBlock1FromMemory();
       return;
@@ -2748,8 +2876,49 @@ function handleInvestigationItemClick(clickEvent) {
 
   if (kind === "file") {
     clearBlock0RecoveryArm();
+    block0DraggedRecoveryFile = "";
     readFile(path);
   }
+}
+
+function handleInvestigationItemDragStart(dragEvent) {
+  var target = dragEvent.target ? dragEvent.target.closest(".investigation-item") : null;
+  var fileName = "";
+  var requiredTag = "";
+  var currentQuestion = null;
+
+  if (!target || target.dataset.draggableRecovery !== "true" || target.dataset.recoveryState !== "recoverable") {
+    if (dragEvent.preventDefault) {
+      dragEvent.preventDefault();
+    }
+    return;
+  }
+
+  fileName = String(target.dataset.path || "").split("/").pop() || "대상 파일";
+  requiredTag = String(target.dataset.requiredTag || "");
+  currentQuestion = getBlock0CurrentQuestion();
+  armBlock0Recovery(fileName, requiredTag, currentQuestion ? String(currentQuestion.prompt || "") : "");
+  block0DraggedRecoveryFile = fileName;
+  if (dragEvent.dataTransfer) {
+    dragEvent.dataTransfer.effectAllowed = "move";
+    dragEvent.dataTransfer.setData("text/plain", fileName);
+  }
+  if (elements.block0ActionCard) {
+    elements.block0ActionCard.classList.add("is-drop-target");
+  }
+  touchPuzzleActivity("block0");
+  renderBlock0Panel();
+}
+
+function handleInvestigationItemDragEnd() {
+  block0DraggedRecoveryFile = "";
+  if (!state.block0ClauseVisible) {
+    clearBlock0RecoveryArm();
+  }
+  if (elements.block0ActionCard) {
+    elements.block0ActionCard.classList.remove("is-drop-target", "is-drop-active");
+  }
+  renderBlock0Panel();
 }
 
 /** ls 구현: 디렉터리 내용을 터미널에 출력하고 패널을 갱신한다. */
@@ -2792,7 +2961,7 @@ function changeDirectory(path) {
     return;
   }
 
-  state.investigationCwd = resolved.path;
+  setInvestigationCwdState(state, resolved.path);
   logSystem("cwd -> " + buildFtpPath(state.investigationCwd));
   setTerminalPathbar(resolved.path);
   renderInvestigationPanel();
@@ -2813,6 +2982,11 @@ function startRemoteFileTransfer(targetPath, entry, done) {
   var jobId = fileTransferJob + 1;
 
   fileTransferJob = jobId;
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.TRANSFER_STARTED, null, {
+    targetPath: targetPath,
+    totalBytes: total,
+    jobId: jobId,
+  });
   setTerminalPathbar(targetPath, "retr");
   setInvestigationPreview(
     "retr " + buildFtpPath(targetPath) + "\nsize " + formatTransferSize(total) + "\nwaiting...",
@@ -2833,7 +3007,14 @@ function startRemoteFileTransfer(targetPath, entry, done) {
     step += 1;
     downloaded = Math.min(total, Math.floor((total * step) / ticks));
     percent = Math.floor((downloaded / total) * 100);
-    speed = 72 + Math.floor(Math.random() * 84);
+    speed = getSimulationRandomInt(72, 155);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.TRANSFER_TICK, null, {
+      targetPath: targetPath,
+      jobId: jobId,
+      percent: percent,
+      downloaded: downloaded,
+      speedKbPerSec: speed,
+    });
 
     if (elements.investigationContent) {
       elements.investigationContent.textContent =
@@ -2845,16 +3026,21 @@ function startRemoteFileTransfer(targetPath, entry, done) {
 
     if (step >= ticks) {
       logSuccess("파일 수신 완료: " + (targetPath.split("/").pop() || targetPath));
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.TRANSFER_COMPLETED, null, {
+        targetPath: targetPath,
+        totalBytes: total,
+        jobId: jobId,
+      });
       if (typeof done === "function") {
         done();
       }
       return;
     }
 
-    setTimeout(tick, 90 + Math.floor(Math.random() * 80));
+    scheduleRuntimeTimeout(tick, getSimulationRandomInt(90, 169), "file-transfer-tick");
   }
 
-  setTimeout(tick, 120);
+  scheduleRuntimeTimeout(tick, 120, "file-transfer-start");
 }
 
 /** cat 공통 파일 로드: 경로 검증 후 전송 연출 시작. */
@@ -2961,6 +3147,10 @@ function renderBlock0Panel() {
       elements.block0ActionCard.classList.add(vm.action.toneClass);
     }
     elements.block0ActionCard.classList.toggle("is-hidden", Boolean(vm.action && vm.action.isHidden));
+    elements.block0ActionCard.classList.toggle(
+      "is-drop-target",
+      Boolean(getActivePuzzlePrefix() === "block0" && !state.block0ClauseVisible && isBlock0UnlockRuleSatisfied(getBlock0CurrentTargetFileName()))
+    );
   }
   if (elements.block0ActionState) {
     elements.block0ActionState.textContent = vm.action ? vm.action.stateLabel : "";
@@ -3062,6 +3252,12 @@ function renderBlock0Panel() {
     elements.block0ClausePanel.classList.toggle("is-goal-ready", vm.clauseGoalReady);
     elements.block0ClausePanel.classList.toggle("is-goal-complete", vm.clauseCompleted);
   }
+  if (elements.block0HintTitle) {
+    elements.block0HintTitle.classList.toggle("is-hidden", !vm.clauseVisible);
+  }
+  if (elements.block0HintGuide) {
+    elements.block0HintGuide.classList.toggle("is-hidden", !vm.clauseVisible);
+  }
   if (elements.block0ClauseTitle) {
     elements.block0ClauseTitle.textContent = vm.clauseTitle;
   }
@@ -3107,18 +3303,25 @@ function pulseBlock0Clause(className) {
     return;
   }
   if (block0ClausePulseTimer) {
-    clearTimeout(block0ClausePulseTimer);
+    clearRuntimeTimer(block0ClausePulseTimer);
     block0ClausePulseTimer = 0;
   }
   elements.block0ClausePanel.classList.remove("is-goal-alert", "is-goal-clear");
   elements.block0ClausePanel.classList.add(className);
-  block0ClausePulseTimer = setTimeout(function clearPulseClass() {
+  block0ClausePulseTimer = scheduleRuntimeTimeout(function clearPulseClass() {
     if (!elements.block0ClausePanel) {
       return;
     }
     elements.block0ClausePanel.classList.remove(className);
     block0ClausePulseTimer = 0;
-  }, 720);
+  }, 720, "clause-pulse-clear");
+}
+
+function setRuntimeFsUnlockedEvent(fileName) {
+  emitStateEvent("fs.file_unlocked", null, {
+    prefix: "block0",
+    fileName: String(fileName || ""),
+  });
 }
 
 /** 지정 파일이 새로 해금되면 목록 동기화 + 강조 애니메이션을 적용한다. */
@@ -3138,7 +3341,8 @@ function unlockBlock0File(fileName, panelMessage, logText, tone) {
   } else {
     logRecoveryEvent("archive entry restored: " + fileName, detailTone);
   }
-  setTimeout(function markUnlockedRow() {
+  setRuntimeFsUnlockedEvent(fileName);
+  scheduleRuntimeTimeout(function markUnlockedRow() {
     if (!elements.investigationList) {
       return;
     }
@@ -3147,10 +3351,10 @@ function unlockBlock0File(fileName, panelMessage, logText, tone) {
       return;
     }
     row.classList.add("is-unlocked");
-    setTimeout(function clearUnlockPulse() {
+    scheduleRuntimeTimeout(function clearUnlockPulse() {
       row.classList.remove("is-unlocked");
-    }, 1400);
-  }, 40);
+    }, 1400, "unlock-row-clear");
+  }, 40, "unlock-row-mark");
 }
 
 /** 패치 적용 전 검증/재조립 파이프라인을 실행한다. */
@@ -3271,7 +3475,7 @@ function applyBlock0SynthesisResult(synthesisResult) {
     return;
   }
   if (synthesisResult.recipeText && state[prefix + "DiscoveredRecipes"].indexOf(synthesisResult.recipeText) === -1) {
-    state[prefix + "DiscoveredRecipes"].push(synthesisResult.recipeText);
+    pushDiscoveredRecipe(state, prefix, synthesisResult.recipeText);
     logSuccess("조합 생성: " + synthesisResult.recipeText);
   }
   collectBlock0Tag(synthesisResult.resultTag, synthesisResult.resultTag, prefix);
@@ -3334,7 +3538,7 @@ function handleBlock0InventoryDragStart(dragEvent) {
   }
 
   syncInvestigationReadOnlyState();
-  state.block0DragHintShown = true;
+  markBlock0DragHint(state);
 
   setFusionDockDragState(block0DraggedTag);
   target.classList.add("is-dragging");
@@ -3532,7 +3736,7 @@ function handleBlock0PurposeSlotDrop(dragEvent) {
   if (prefix === "block0") {
     setBlock0Purpose(droppedTag);
   } else {
-    state[prefix + "PurposeValue"] = droppedTag;
+    setPuzzlePurposeValue(state, prefix, droppedTag);
   }
   renderBlock0Panel();
   touchPuzzleActivity(prefix);
@@ -3589,6 +3793,7 @@ function activatePendingRecoveryPrompt() {
 
   pendingFile = String(block0PendingRecoveryPrompt.fileName || "");
   mountBlock0Clause();
+  block0DraggedRecoveryFile = "";
   logSuccess("복구 식 연결: " + pendingFile);
   renderBlock0Panel();
   renderInvestigationPanel();
@@ -3596,11 +3801,49 @@ function activatePendingRecoveryPrompt() {
   touchPuzzleActivity("block0");
 }
 
-function handleWorkbenchActionButtonClick() {
-  var action = elements.block0ActionButton ? String(elements.block0ActionButton.dataset.action || "") : "";
-  if (action === "start-recovery") {
-    activatePendingRecoveryPrompt();
+function handleWorkbenchRecoveryDragEnter(dragEvent) {
+  if (!elements.block0ActionCard || state.block0ClauseVisible || !block0DraggedRecoveryFile) {
+    return;
   }
+  dragEvent.preventDefault();
+  elements.block0ActionCard.classList.add("is-drop-active");
+}
+
+function handleWorkbenchRecoveryDragOver(dragEvent) {
+  if (!elements.block0ActionCard || state.block0ClauseVisible) {
+    return;
+  }
+  dragEvent.preventDefault();
+  if (dragEvent.dataTransfer) {
+    dragEvent.dataTransfer.dropEffect = block0DraggedRecoveryFile ? "move" : "none";
+  }
+  elements.block0ActionCard.classList.toggle("is-drop-active", Boolean(block0DraggedRecoveryFile));
+}
+
+function handleWorkbenchRecoveryDragLeave(dragEvent) {
+  if (!elements.block0ActionCard) {
+    return;
+  }
+  if (dragEvent.relatedTarget && elements.block0ActionCard.contains(dragEvent.relatedTarget)) {
+    return;
+  }
+  elements.block0ActionCard.classList.remove("is-drop-active");
+}
+
+function handleWorkbenchRecoveryDrop(dragEvent) {
+  dragEvent.preventDefault();
+  if (elements.block0ActionCard) {
+    elements.block0ActionCard.classList.remove("is-drop-active");
+  }
+  if (!block0DraggedRecoveryFile) {
+    logWarn("작업대에 마운트할 수 없는 파일입니다");
+    return;
+  }
+  if (!block0PendingRecoveryPrompt || String(block0PendingRecoveryPrompt.fileName || "") !== block0DraggedRecoveryFile) {
+    logWarn("복구 불가: 선행 조각 필요");
+    return;
+  }
+  activatePendingRecoveryPrompt();
 }
 
 /** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
@@ -3639,7 +3882,7 @@ function handleBlock0PurposeSlotClick() {
   if (prefix === "block0") {
     clearBlock0Purpose();
   } else {
-    state[prefix + "PurposeValue"] = "";
+    setPuzzlePurposeValue(state, prefix, "");
   }
   if (elements.block0PurposeSlot) {
     elements.block0PurposeSlot.classList.remove("is-drop-hover");
@@ -3669,11 +3912,17 @@ function handleBlock0ExecuteClick() {
   }
 
   if (prefix === "block1") {
-    state.block1SolvedAnswers.push(expectedAnswer);
+    commitBlock1Answer(state, expectedAnswer);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_ANSWER_COMMITTED, null, {
+      answer: expectedAnswer,
+      questionId: currentQuestion.id,
+    });
     logSuccess("패치 반영: " + currentQuestion.id);
     if (state.block1QuestionIndex < questions.length - 1) {
-      state.block1QuestionIndex += 1;
-      state.block1PurposeValue = "";
+      advanceBlock1Question(state, questions.length);
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_QUESTION_ADVANCED, null, {
+        nextIndex: state.block1QuestionIndex,
+      });
       block1ActiveRecoveryFile = "";
       pulseBlock0Clause("is-goal-clear");
       renderBlock0Panel();
@@ -3724,8 +3973,10 @@ function completeBlock1ClauseIfReady() {
     return;
   }
 
-  state.block1Completed = true;
-  state.block1Integrity = Math.max(state.block1Integrity, 36);
+  completeBlock1Progress(state, 36);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_COMPLETED, null, {
+    integrity: state.block1Integrity,
+  });
   logRestored(buildRestoredStampLine());
   logSuccess("복구 완료: block-1");
   BLOCK1_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
@@ -3778,9 +4029,8 @@ function clearLog() {
   if (elements.log) {
     elements.log.innerHTML = "";
   }
-  state.logQueue = [];
-  state.typingActive = false;
-  state.logPinnedToBottom = true;
+  resetLogQueueState(state);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.LOG_RESET);
   terminalSummaryLines = [];
   terminalSummaryLastKey = "";
   terminalSummaryRepeatCount = 0;
@@ -3831,7 +4081,7 @@ function logRestored(text, options) {
 
 /** "[복원됨 YYYY. M. D. 오전/오후 h:mm:ss]" 형식의 스탬프 라인을 생성한다. */
 function buildRestoredStampLine(dateValue) {
-  var date = dateValue instanceof Date ? dateValue : new Date();
+  var date = getSimulationDate(dateValue);
   var year = date.getFullYear();
   var month = date.getMonth() + 1;
   var day = date.getDate();
@@ -3885,12 +4135,16 @@ function handleLogScroll() {
 
   var threshold = 12;
   var distanceToBottom = elements.log.scrollHeight - (elements.log.scrollTop + elements.log.clientHeight);
-  state.logPinnedToBottom = distanceToBottom <= threshold;
+  setLogPinnedState(state, distanceToBottom <= threshold);
 }
 
 /** 타이핑 출력 큐에 로그 항목을 등록한다. */
 function enqueueLogLine(text, tone) {
-  state.logQueue.push({ text: text, tone: tone || "log-muted" });
+  enqueueLogItem(state, { text: text, tone: tone || "log-muted" });
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.LOG_ENQUEUED, null, {
+    text: String(text || ""),
+    tone: tone || "log-muted",
+  });
   if (!state.typingActive) {
     processNextLogLine();
   }
@@ -3899,11 +4153,13 @@ function enqueueLogLine(text, tone) {
 /** 로그 큐를 순차 타이핑 출력한다(현재는 필요 시에만 사용). */
 function processNextLogLine() {
   if (state.logQueue.length === 0) {
-    state.typingActive = false;
+    setTypingActiveState(state, false);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.LOG_TYPING_UPDATED, null, { active: false });
     return;
   }
 
-  state.typingActive = true;
+  setTypingActiveState(state, true);
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.LOG_TYPING_UPDATED, null, { active: true });
   var nextItem = state.logQueue.shift();
   var line = createLogLine(nextItem.tone);
   var text = nextItem.text;
@@ -3922,7 +4178,7 @@ function processNextLogLine() {
     index += 1;
 
     if (index < text.length) {
-      setTimeout(typeNextChar, GAME_CONFIG.typingCharDelayMs);
+      scheduleRuntimeTimeout(typeNextChar, GAME_CONFIG.typingCharDelayMs, "log-typing-char");
     } else {
       finishTypedLine();
     }
@@ -3930,10 +4186,11 @@ function processNextLogLine() {
 
   function finishTypedLine() {
     scrollLogToBottom();
-    setTimeout(function scheduleNext() {
-      state.typingActive = false;
+    scheduleRuntimeTimeout(function scheduleNext() {
+      setTypingActiveState(state, false);
+      emitStateEvent(RUNTIME_TRANSITION_EVENT.LOG_TYPING_UPDATED, null, { active: false });
       processNextLogLine();
-    }, GAME_CONFIG.typingLineDelayMs);
+    }, GAME_CONFIG.typingLineDelayMs, "log-typing-line");
   }
 
   typeNextChar();

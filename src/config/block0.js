@@ -219,5 +219,4 @@ export const BLOCK0_SPEC = {
     mismatchLog: "patch rejected: binding mismatch",
     completeSuccessLog: "복구 완료: block-0",
   },
-  hintDelayMs: 20000,
 };
