@@ -16,6 +16,7 @@ export const RUNTIME_TRANSITION_EVENT = Object.freeze({
   BLOCK1_QUESTION_ADVANCED: "block1.question_advanced",
   BLOCK1_COMPLETED: "block1.completed",
   PIPELINE_UPDATED: "pipeline.updated",
+  UI_PROFILE_SELECTED: "ui.profile_selected",
   LOG_RESET: "log.reset",
   LOG_ENQUEUED: "log.enqueued",
   LOG_TYPING_UPDATED: "log.typing_updated",
@@ -120,6 +121,7 @@ export function resetBlock1Progress(runtimeState, initialIntegrity) {
   state.block1QuestionIndex = 0;
   state.block1SolvedAnswers = [];
   state.block1DiscoveredRecipes = [];
+  state.selectedProfileId = "";
 }
 
 export function startBlock1Progress(runtimeState, initialIntegrity) {
@@ -134,6 +136,7 @@ export function startBlock1Progress(runtimeState, initialIntegrity) {
   state.block1QuestionIndex = 0;
   state.block1SolvedAnswers = [];
   state.block1DiscoveredRecipes = [];
+  state.selectedProfileId = "";
 }
 
 export function commitBlock1Answer(runtimeState, answer) {
@@ -188,6 +191,11 @@ export function setBlock0Pipeline(runtimeState, stage, progress) {
   var state = ensureRuntimeState(runtimeState);
   state.block0PipelineStage = String(stage || "");
   state.block0PipelineProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+}
+
+export function setSelectedProfileCard(runtimeState, profileId) {
+  var state = ensureRuntimeState(runtimeState);
+  state.selectedProfileId = String(profileId || "");
 }
 
 export function resetLogQueueState(runtimeState) {

@@ -52,7 +52,7 @@
                     <span class="workbench-action-state" id="block0-action-state">대기</span>
                   </div>
                   <div class="workbench-action-title" id="block0-action-title">대기 중</div>
-                  <div class="workbench-action-body" id="block0-action-body">증거 파일을 열어 연결하세요.</div>
+                  <div class="workbench-action-body" id="block0-action-body">상태 잔여 파일을 열어 연결하세요.</div>
                   <div class="workbench-progress is-hidden" id="block0-progress">
                     <div class="workbench-progress-bar">
                       <span class="workbench-progress-fill" id="block0-progress-fill"></span>
@@ -63,31 +63,22 @@
                 </section>
                 <div class="block0-clause is-hidden" id="block0-clause-panel">
                   <div class="block0-clause-head">
-                    <div class="block0-clause-title" id="block0-clause-title">복구 식</div>
+                    <div class="block0-clause-title" id="block0-clause-title">누락 식 복원</div>
                   </div>
                   <div class="block0-clause-target">
                     <span class="block0-target-badge" id="block0-target-badge">식 A</span>
                     <span class="block0-target-text" id="block0-purpose-label">목적(Self) =</span>
-                  </div>
-                  <div class="block0-slot-line">
-                    <span class="block0-input-label">대입</span>
                     <button type="button" class="block0-tag-slot block0-slot purpose expecting" id="block0-purpose-slot">[태그를 드롭]</button>
                   </div>
                 </div>
-                <div class="block0-title is-hidden" id="block0-hint-title">복구 힌트</div>
-                <div class="block0-hint-guide is-hidden" id="block0-hint-guide">
-                  <div class="block0-hint-line"><span class="block0-hint-formula">A(B)</span><span class="block0-hint-meaning">A의 대상= B다.</span></div>
-                  <div class="block0-hint-line"><span class="block0-hint-formula">A = B</span><span class="block0-hint-meaning">A의 정의는 B다.</span></div>
-                  <div class="block0-hint-line"><span class="block0-hint-formula">A ⇒ B</span><span class="block0-hint-meaning">A가 성립하면 B가 성립한다.</span></div>
-                  <div class="block0-hint-line"><span class="block0-hint-formula">A ∧ B</span><span class="block0-hint-meaning">A와 B가 함께 성립한다.</span></div>
-                  <div class="block0-hint-line"><span class="block0-hint-formula">¬A</span><span class="block0-hint-meaning">A는 성립하지 않는다.</span></div>
-                </div>
-                <div class="block0-title">연결된 조각</div>
+                <div class="block0-title">보유 조각</div>
                 <div class="block0-inventory" id="block0-tag-inventory"></div>
                 <div class="block0-title">조합 도구</div>
                 <div class="block0-fusion-dock" id="block0-fusion-dock"></div>
-                <div class="block0-title">복구 기록</div>
-                <div class="block0-recipe-list" id="block0-recipe-list">아직 기록된 조합이 없습니다.</div>
+                <div class="block0-profile-panel" id="block0-profile-panel">
+                  <div class="block0-title">참조 인물</div>
+                  <div class="block0-profile-card is-hidden" id="block0-profile-card"></div>
+                </div>
               </section>
             </section>
           </section>
@@ -173,13 +164,6 @@
         </form>
       </section>
 
-      <section class="memory-modal is-hidden" id="block0-memory-modal" aria-live="polite">
-        <div class="memory-modal-card">
-          <div class="memory-modal-title">기억 조각 연결 완료</div>
-          <div class="memory-modal-text" id="block0-memory-modal-text"></div>
-          <button type="button" class="memory-modal-next" id="block0-memory-modal-next">다음 복구 열기</button>
-        </div>
-      </section>
     </div>
 
     <script type="module" src="./app.js"></script>

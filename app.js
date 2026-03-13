@@ -26,6 +26,7 @@ import {
   setInvestigationCwdState,
   setLogPinnedState,
   setPuzzlePurposeValue,
+  setSelectedProfileCard,
   setTypingActiveState,
   startBlock1Progress,
   advanceBlock1Question,
@@ -128,6 +129,7 @@ function buildSimulationSnapshot() {
       pipelineStage: String(state.block0PipelineStage || ""),
       pipelineProgress: Number(state.block0PipelineProgress || 0),
       memoryUnlocked: Boolean(state.block0MemoryUnlocked),
+      selectedProfileId: String(state.selectedProfileId || ""),
       activeRecoveryFile: String(block0ActiveRecoveryFile || ""),
       hasPendingRecoveryPrompt: Boolean(block0PendingRecoveryPrompt),
     },
@@ -697,100 +699,6 @@ function getBlock0CurrentTargetFileName() {
     return "";
   }
   return sequence[idx] || "";
-}
-
-function escapeHtml(text) {
-  return String(text || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function buildBlock0HintPanelHtml() {
-  if (getActivePuzzlePrefix() === "block1") {
-    if (state.block1DiscoveredRecipes.length === 0 && state.block1SolvedAnswers.length === 0) {
-      return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
-    }
-    return (
-      '<div class="hint-section">' +
-      '<div class="hint-section-title">복구 기록</div>' +
-      state.block1DiscoveredRecipes.map(function renderRecipe(recipeText) {
-        return (
-          '<div class="hint-row">' +
-          '<span class="hint-chip">조합</span>' +
-          '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
-          "</div>"
-        );
-      }).join("") +
-      state.block1SolvedAnswers.map(function renderSolved(answerText) {
-        return (
-          '<div class="hint-row">' +
-          '<span class="hint-chip">복구</span>' +
-          '<span class="hint-main">' + escapeHtml(answerText) + "</span>" +
-          "</div>"
-        );
-      }).join("") +
-      "</div>"
-    );
-  }
-
-  var hints = BLOCK0_SPEC.hints || {};
-  var synthesisHints = hints.synthesis || {};
-  var interpretations = Array.isArray(hints.interpretations) ? hints.interpretations : [];
-  var recipeLines = [];
-  var interpretationLines = [];
-  var recipeIndex = 0;
-  var solvedIndex = 0;
-
-  while (recipeIndex < state.block0DiscoveredRecipes.length) {
-    var recipeText = String(state.block0DiscoveredRecipes[recipeIndex] || "");
-    var resultTag = recipeText.indexOf("->") !== -1 ? recipeText.split("->").pop().trim() : "";
-    var hintSpec = resultTag ? synthesisHints[resultTag] || null : null;
-    recipeLines.push(
-      '<div class="hint-row">' +
-      '<span class="hint-chip">' + escapeHtml((hintSpec && hintSpec.colorHint) || "조합") + "</span>" +
-      '<span class="hint-main">' + escapeHtml(recipeText) + "</span>" +
-      '<span class="hint-note">' + escapeHtml((hintSpec && hintSpec.note) || "필요한 조각을 맞춰 결과 조각을 만듭니다.") + "</span>" +
-      "</div>"
-    );
-    recipeIndex += 1;
-  }
-
-  while (solvedIndex < state.block0SolvedAnswers.length && solvedIndex < interpretations.length) {
-    interpretationLines.push(
-      '<div class="hint-row">' +
-      '<span class="hint-chip">해석</span>' +
-      '<span class="hint-main">' + escapeHtml(interpretations[solvedIndex]) + "</span>" +
-      "</div>"
-    );
-    solvedIndex += 1;
-  }
-
-  if (state.block0MemoryUnlocked && hints.block1FolderHint) {
-    interpretationLines.push(
-      '<div class="hint-row">' +
-      '<span class="hint-chip">다음 단계</span>' +
-      '<span class="hint-main">' + escapeHtml(hints.block1FolderHint) + "</span>" +
-      "</div>"
-    );
-  }
-
-  if (recipeLines.length === 0 && interpretationLines.length === 0) {
-    return '<div class="hint-empty">아직 기록된 복구가 없습니다.</div>';
-  }
-
-  return (
-    '<div class="hint-section">' +
-    '<div class="hint-section-title">조합 기록</div>' +
-    (recipeLines.length ? recipeLines.join("") : '<div class="hint-empty">조합 기록이 생기면 여기에 남습니다.</div>') +
-    "</div>" +
-    '<div class="hint-section">' +
-    '<div class="hint-section-title">해석 기록</div>' +
-    (interpretationLines.length ? interpretationLines.join("") : '<div class="hint-empty">복구가 진행되면 현재까지의 의미가 정리됩니다.</div>') +
-    "</div>"
-  );
 }
 
 function clearPuzzleIdleHint() {
@@ -1527,6 +1435,7 @@ function setupBlockLifecycles() {
       state.block0QuestionIndex = 0;
       state.block0SolvedAnswers = [];
       state.block0MemoryUnlocked = false;
+      state.selectedProfileId = "";
       state.block0DragHintShown = false;
       state.block0DiscoveredRecipes = [];
       block0RecoveryMetaByFile = {};
@@ -1807,14 +1716,13 @@ function cacheElements() {
   elements.block0ProgressLabel = document.getElementById("block0-progress-label");
   elements.block0TagInventory = document.getElementById("block0-tag-inventory");
   elements.block0FusionDock = document.getElementById("block0-fusion-dock");
-  elements.block0RecipeList = document.getElementById("block0-recipe-list");
   elements.block0ClausePanel = document.getElementById("block0-clause-panel");
   elements.block0ClauseTitle = document.getElementById("block0-clause-title");
   elements.block0TargetBadge = document.getElementById("block0-target-badge");
   elements.block0PurposeLabel = document.getElementById("block0-purpose-label");
   elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
-  elements.block0HintTitle = document.getElementById("block0-hint-title");
-  elements.block0HintGuide = document.getElementById("block0-hint-guide");
+  elements.block0ProfilePanel = document.getElementById("block0-profile-panel");
+  elements.block0ProfileCard = document.getElementById("block0-profile-card");
   elements.block0MemoryModal = document.getElementById("block0-memory-modal");
   elements.block0MemoryModalText = document.getElementById("block0-memory-modal-text");
   elements.block0MemoryModalNext = document.getElementById("block0-memory-modal-next");
@@ -2591,8 +2499,12 @@ function setInvestigationPreview(text, path, lines) {
   var linkedPrefix = getPuzzlePrefixForPath(path);
   var fileIndex = getPuzzleFileIndex(linkedPrefix);
   var hasLinkedContent = false;
+  var nextPath = path || "";
   pinnedInvestigationPreview = null;
-  previewFilePath = path || "";
+  if (String(previewFilePath || "") !== String(nextPath || "")) {
+    state.selectedProfileId = "";
+  }
+  previewFilePath = nextPath;
   previewFileLines = Array.isArray(lines) ? lines.slice() : [];
   hasLinkedContent =
     Boolean(fileIndex[previewFilePath]) &&
@@ -2602,6 +2514,7 @@ function setInvestigationPreview(text, path, lines) {
   if (hasLinkedContent) {
     renderPreviewBufferWithTagLinks(previewFilePath, previewFileLines);
   } else if (elements.investigationContent) {
+    elements.investigationContent.classList.remove("is-structured-preview");
     elements.investigationContent.textContent = text || DEFAULT_PREVIEW_HINT;
   }
 }
@@ -2615,6 +2528,8 @@ function renderPinnedInvestigationPreview() {
 
   previewFilePath = "";
   previewFileLines = [];
+  state.selectedProfileId = "";
+  elements.investigationContent.classList.remove("is-structured-preview");
   elements.investigationContent.textContent = preview.text || DEFAULT_PREVIEW_HINT;
   return true;
 }
@@ -2631,12 +2546,15 @@ function pinTextPreview(text) {
 /** PREVIEW BUFFER 로그 라인을 태그 링크 포함 형태로 렌더링한다. */
 function renderPreviewBufferWithTagLinks(path, lines) {
   var prefix = getPuzzlePrefixForPath(path);
+  var spec = getPuzzleSpec(prefix);
   renderPreviewBuffer({
     container: elements.investigationContent,
     path: path,
     lines: lines,
     fileSpecByPath: prefix === "block1" ? block1FileByPath : block0FileByPath,
     collectedTags: state[prefix + "CollectedTags"],
+    speakerProfiles: spec && spec.profiles ? spec.profiles : {},
+    selectedProfileId: state.selectedProfileId || "",
   });
 }
 
@@ -3112,13 +3030,16 @@ function buildBlock0PanelViewModel() {
   var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var blockTitle = spec.title || (isBlock0 ? "복구 블록 0" : "복구 블록");
   var action = buildWorkbenchActionViewModel(prefix);
+  var previewSpec = (isBlock0 && previewFilePath && block0FileByPath[previewFilePath]) ? block0FileByPath[previewFilePath] : null;
+  var profiles = (spec && spec.profiles) || {};
+  var participantIds = previewSpec && Array.isArray(previewSpec.participants) ? previewSpec.participants : [];
+  var selectedProfile = participantIds.indexOf(state.selectedProfileId) !== -1 ? profiles[state.selectedProfileId] || null : null;
   return {
     statusText:
       blockTitle + " · integrity " + state[prefix + "Integrity"] + "% · linked " + collectedTags.length +
       (isBlock0 && block0AnswerRecoveryActive ? " · pipeline active" : ""),
     action: action,
     tags: tags,
-    recipeHtml: buildBlock0HintPanelHtml(),
     clauseTitle: (((spec.clause || {}).title || spec.title || "repair clause")) + (activeRecoveryFile ? (" · " + activeRecoveryFile) : ""),
     clauseTargetBadge: currentQuestion ? patchTarget.badgeText : "완료",
     clauseVisible: state[prefix + "ClauseVisible"],
@@ -3132,7 +3053,28 @@ function buildBlock0PanelViewModel() {
       slots: fusionSlots,
       active: Boolean(block0FusionDraft.operator),
     },
+    profile: selectedProfile,
   };
+}
+
+function renderProfileCardHtml(profile) {
+  if (!profile) {
+    return "";
+  }
+  return (
+    '<div class="block0-profile-card">' +
+    '<div class="profile-card-head">' +
+    '<div class="profile-card-label">LOG REFERENCE</div>' +
+    '<div class="profile-card-name">' + String(profile.name || "") + "</div>" +
+    "</div>" +
+    '<div class="profile-card-grid">' +
+    '<div class="profile-card-key">이름</div><div class="profile-card-value">' + String(profile.name || "") + "</div>" +
+    '<div class="profile-card-key">역할</div><div class="profile-card-value">' + String(profile.role || "") + "</div>" +
+    '<div class="profile-card-key">전공</div><div class="profile-card-value">' + String(profile.field || "") + "</div>" +
+    '<div class="profile-card-key">생년월일</div><div class="profile-card-value">' + String(profile.birthdate || "") + "</div>" +
+    "</div>" +
+    "</div>"
+  );
 }
 
 function renderBlock0Panel() {
@@ -3244,19 +3186,10 @@ function renderBlock0Panel() {
       slotHtml +
       "</div>";
   }
-  if (elements.block0RecipeList) {
-    elements.block0RecipeList.innerHTML = vm.recipeHtml;
-  }
   if (elements.block0ClausePanel) {
     elements.block0ClausePanel.classList.toggle("is-hidden", !vm.clauseVisible);
     elements.block0ClausePanel.classList.toggle("is-goal-ready", vm.clauseGoalReady);
     elements.block0ClausePanel.classList.toggle("is-goal-complete", vm.clauseCompleted);
-  }
-  if (elements.block0HintTitle) {
-    elements.block0HintTitle.classList.toggle("is-hidden", !vm.clauseVisible);
-  }
-  if (elements.block0HintGuide) {
-    elements.block0HintGuide.classList.toggle("is-hidden", !vm.clauseVisible);
   }
   if (elements.block0ClauseTitle) {
     elements.block0ClauseTitle.textContent = vm.clauseTitle;
@@ -3281,9 +3214,16 @@ function renderBlock0Panel() {
       elements.block0PurposeSlot.classList.toggle("mismatch", !vm.purposeMatch);
     }
   }
+  if (elements.block0ProfilePanel) {
+    elements.block0ProfilePanel.classList.toggle("is-hidden", !vm.profile);
+  }
+  if (elements.block0ProfileCard) {
+    elements.block0ProfileCard.classList.toggle("is-hidden", !vm.profile);
+    elements.block0ProfileCard.innerHTML = vm.profile ? renderProfileCardHtml(vm.profile) : "";
+  }
 }
 
-/** 기억 조각 팝업 표시/숨김. */
+/** legacy 기억 조각 레이어 표시/숨김. */
 function setBlock0MemoryModalVisible(visible) {
   if (elements.block0MemoryModal) {
     elements.block0MemoryModal.classList.toggle("is-hidden", !visible);
@@ -3755,7 +3695,7 @@ function onBlock0FileOpened(path) {
   }
 }
 
-/** 기억 조각 팝업 내 다음 복구 버튼 클릭 처리. */
+/** legacy 기억 조각 버튼 경로. */
 function handleBlock0MemoryModalNextClick() {
   if (!state.block0MemoryUnlocked || state.block1Started) {
     return;
@@ -3848,8 +3788,23 @@ function handleWorkbenchRecoveryDrop(dragEvent) {
 
 /** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
 function handleInvestigationPreviewClick(clickEvent) {
+  var profileTarget = clickEvent.target ? clickEvent.target.closest(".preview-profile-link") : null;
   var target = clickEvent.target ? clickEvent.target.closest(".preview-tag-link") : null;
 
+  if (profileTarget && profileTarget.dataset) {
+    var nextProfileId = String(profileTarget.dataset.profile || "");
+    var selectedProfileId = String(state.selectedProfileId || "");
+    setSelectedProfileCard(state, selectedProfileId === nextProfileId ? "" : nextProfileId);
+    emitStateEvent(RUNTIME_TRANSITION_EVENT.UI_PROFILE_SELECTED, null, {
+      profileId: String(state.selectedProfileId || ""),
+      previewPath: String(previewFilePath || ""),
+    });
+    renderBlock0Panel();
+    if (previewFilePath && previewFileLines.length > 0) {
+      renderPreviewBufferWithTagLinks(previewFilePath, previewFileLines);
+    }
+    return;
+  }
   if (!target || !target.dataset) {
     return;
   }
@@ -3987,9 +3942,10 @@ function completeBlock1ClauseIfReady() {
   clearPuzzleIdleHint();
 }
 
-/** Clause 완료 조건을 검사하고 복원 문장/기억 조각을 연다. */
+/** Clause 완료 조건을 검사하고 복원 문장/후속 로그를 연다. */
 function completeBlock0ClauseIfReady() {
   var lifecycle = BLOCK0_SPEC.lifecycle || {};
+  var postCompletionLogs = Array.isArray(lifecycle.postCompletionLogs) ? lifecycle.postCompletionLogs : [];
   var questions = getBlock0ClauseQuestions();
   if (state.block0Completed) {
     return;
@@ -4010,13 +3966,14 @@ function completeBlock0ClauseIfReady() {
   BLOCK0_SPEC.clause.outputText.forEach(function writeClauseLine(line) {
     logInfo(line);
   });
-  logSystem("기억 조각 연결: " + BLOCK0_SPEC.memory.text);
+  postCompletionLogs.forEach(function writeCompletionLog(entry) {
+    appendLogLine(String((entry && entry.text) || ""), (entry && entry.tone) || "log-muted");
+  });
   syncBlock0Fs();
   renderInvestigationPanel();
   if (block0Lifecycle) {
     block0Lifecycle.onComplete({ reason: "clause-complete" });
   }
-  setBlock0MemoryModalVisible(true);
   renderBlock0Panel();
 
   clearPuzzleIdleHint();
