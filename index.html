@@ -62,13 +62,19 @@
                   <button type="button" class="workbench-action-cta is-hidden" id="block0-action-button">복구 연결</button>
                 </section>
                 <div class="block0-clause is-hidden" id="block0-clause-panel">
-                  <div class="block0-clause-head">
-                    <div class="block0-clause-title" id="block0-clause-title">누락 식 복원</div>
-                  </div>
                   <div class="block0-clause-target">
-                    <span class="block0-target-badge" id="block0-target-badge">식 A</span>
-                    <span class="block0-target-text" id="block0-purpose-label">목적(Self) =</span>
-                    <button type="button" class="block0-tag-slot block0-slot purpose expecting" id="block0-purpose-slot">[태그를 드롭]</button>
+                    <div class="block0-clause-status-row">
+                      <span class="block0-target-badge" id="block0-target-badge">3개 상태 복구</span>
+                      <span class="block0-clause-file" id="block0-clause-file">증거 파일은 모두 읽기 전용입니다.</span>
+                    </div>
+                    <div class="block0-clause-grid" id="block0-clause-grid"></div>
+                    <div class="block0-clause-output" id="block0-clause-output">
+                      <div class="block0-clause-output-head">
+                        <span class="block0-clause-output-title">통합_상태</span>
+                        <span class="block0-clause-output-status">자동 계산</span>
+                      </div>
+                      <button type="button" class="block0-tag-slot block0-slot integrated expecting" id="block0-integrated-value" disabled>[자동 계산 대기]</button>
+                    </div>
                   </div>
                 </div>
                 <div class="block0-title">보유 조각</div>
@@ -144,22 +150,18 @@
             </ul>
           </div>
           <div class="auth-field auth-field-username">
-            <label class="auth-label" for="auth-consent-text">확인 문구</label>
-            <div class="auth-field-copy">'동의합니다.'를 그대로 입력하세요.</div>
-            <input
-              class="auth-input"
-              id="auth-consent-text"
-              name="observer_consent_text"
-              type="text"
-              spellcheck="false"
-              autocapitalize="none"
-              autocomplete="off"
-              data-lpignore="true"
-              placeholder="동의합니다."
-            />
+            <div class="auth-label">열람 동의</div>
+            <div class="auth-field-copy">아래 버튼을 눌러 열람 주의 사항에 동의하세요.</div>
+            <button
+              class="auth-consent-button"
+              id="auth-consent-button"
+              name="observer_consent_button"
+              type="button"
+              aria-pressed="false"
+            >주의 사항을 확인했고 동의합니다.</button>
           </div>
           <div class="auth-error" id="auth-error"></div>
-          <div class="auth-hint">띄어쓰기와 마침표까지 포함해 정확히 입력해야 합니다.</div>
+          <div class="auth-hint">동의 버튼을 누르면 열람 시작 버튼이 활성화됩니다.</div>
           <button type="submit" class="auth-submit">동의하고 열기</button>
         </form>
       </section>

@@ -4,6 +4,7 @@ import { BLOCK1_SPEC } from "./src/config/block1.js";
 import { FLOW_PHASE, state, elements } from "./src/state/state.js";
 import {
   BLOCK0_TRANSITION_ACTION,
+  BLOCK0_SLOT_KEYS,
   createBlock0TransitionDispatcher,
 } from "./src/state/block0-transition.js";
 import {
@@ -26,6 +27,7 @@ import {
   setInvestigationCwdState,
   setLogPinnedState,
   setPuzzlePurposeValue,
+  setAuthConsentAcceptedState,
   setSelectedProfileCard,
   setTypingActiveState,
   startBlock1Progress,
@@ -93,12 +95,9 @@ var block0RecoveryMetaByFile = {};
 var block1RecoveryMetaByFile = {};
 var block0RecoveryRootMeta = null;
 var block1RecoveryRootMeta = null;
-var block0PendingRecoveryPrompt = null;
-var block0ActiveRecoveryFile = "";
 var block1ActiveRecoveryFile = "";
 var pinnedInvestigationPreview = null;
 var block0TransitionDispatcher = null;
-var block0DraggedRecoveryFile = "";
 var simulationEngine = null;
 var simulationSeed = (Date.now() >>> 0) || 1;
 var simulationAutoClockTimer = 0;
@@ -111,6 +110,9 @@ function buildSimulationSnapshot() {
     phase: state.phase,
     inputEnabled: Boolean(state.inputEnabled),
     openingIndex: Number(state.openingIndex || 0),
+    auth: {
+      consentAccepted: Boolean(state.authConsentAccepted),
+    },
     investigation: {
       booting: Boolean(state.investigationBooting),
       cwd: String(state.investigationCwd || ""),
@@ -121,8 +123,16 @@ function buildSimulationSnapshot() {
       started: Boolean(state.block0Started),
       completed: Boolean(state.block0Completed),
       questionIndex: Number(state.block0QuestionIndex || 0),
-      purposeValue: String(state.block0PurposeValue || ""),
       clauseVisible: Boolean(state.block0ClauseVisible),
+      clauseAnswers: Object.assign(
+        {
+          purpose: "",
+          mapping: "",
+          design: "",
+        },
+        state.block0ClauseAnswers || {}
+      ),
+      purposeValue: String(state.block0PurposeValue || ""),
       visibleFiles: Array.isArray(state.block0VisibleFiles) ? state.block0VisibleFiles.slice() : [],
       collectedTags: Array.isArray(state.block0CollectedTags) ? state.block0CollectedTags.slice() : [],
       solvedAnswers: Array.isArray(state.block0SolvedAnswers) ? state.block0SolvedAnswers.slice() : [],
@@ -130,8 +140,8 @@ function buildSimulationSnapshot() {
       pipelineProgress: Number(state.block0PipelineProgress || 0),
       memoryUnlocked: Boolean(state.block0MemoryUnlocked),
       selectedProfileId: String(state.selectedProfileId || ""),
-      activeRecoveryFile: String(block0ActiveRecoveryFile || ""),
-      hasPendingRecoveryPrompt: Boolean(block0PendingRecoveryPrompt),
+      activeRecoveryFile: "",
+      hasPendingRecoveryPrompt: false,
     },
     block1: {
       started: Boolean(state.block1Started),
@@ -314,20 +324,8 @@ function getBlock0TransitionDispatcher() {
     getState: function getState() {
       return state;
     },
-    getPendingRecoveryPrompt: function getPendingRecoveryPrompt() {
-      return block0PendingRecoveryPrompt;
-    },
-    setPendingRecoveryPrompt: function setPendingRecoveryPrompt(nextPrompt) {
-      block0PendingRecoveryPrompt = nextPrompt;
-    },
-    getActiveRecoveryFile: function getActiveRecoveryFile() {
-      return block0ActiveRecoveryFile;
-    },
-    setActiveRecoveryFile: function setActiveRecoveryFile(fileName) {
-      block0ActiveRecoveryFile = String(fileName || "");
-    },
-    getQuestionCount: function getQuestionCount() {
-      return getBlock0ClauseQuestions().length;
+    getExpectedAnswerCount: function getExpectedAnswerCount() {
+      return BLOCK0_SLOT_KEYS.length;
     },
     emitStateEvent: emitStateEvent,
   });
@@ -338,42 +336,26 @@ function transitionBlock0(action, payload) {
   return getBlock0TransitionDispatcher().transitionBlock0(action, payload || {});
 }
 
-function armBlock0Recovery(fileName, requiredTag, questionText) {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.ARM_RECOVERY, {
-    fileName: fileName,
-    requiredTag: requiredTag,
-    questionText: questionText,
+function showBlock0BatchClause() {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.SHOW_BATCH_CLAUSE);
+}
+
+function setBlock0BatchSlot(slotKey, value) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.SET_BATCH_SLOT, {
+    slotKey: slotKey,
+    value: value,
   });
 }
 
-function clearBlock0RecoveryArm() {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.CLEAR_RECOVERY_ARM);
-}
-
-function mountBlock0Clause() {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.MOUNT_CLAUSE);
-}
-
-function setBlock0Purpose(value) {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.SET_PURPOSE, {
-    purposeValue: value,
+function clearBlock0BatchSlot(slotKey) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.CLEAR_BATCH_SLOT, {
+    slotKey: slotKey,
   });
 }
 
-function clearBlock0Purpose() {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.CLEAR_PURPOSE);
-}
-
-function commitBlock0Answer(answer) {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.COMMIT_ANSWER, {
-    answer: answer,
-  });
-}
-
-function advanceBlock0Question(hasNextTargetFile) {
-  return transitionBlock0(BLOCK0_TRANSITION_ACTION.ADVANCE_QUESTION, {
-    hasNextTargetFile: Boolean(hasNextTargetFile),
-    finalRecoveryFile: "최종 복구식",
+function commitBlock0Batch(integratedAnswer) {
+  return transitionBlock0(BLOCK0_TRANSITION_ACTION.COMMIT_BATCH, {
+    integratedAnswer: integratedAnswer,
   });
 }
 
@@ -576,7 +558,7 @@ function getPuzzlePreviousQuestion(prefix) {
 }
 
 function getPuzzleCurrentRecoveryFile(prefix) {
-  return prefix === "block1" ? block1ActiveRecoveryFile : block0ActiveRecoveryFile;
+  return prefix === "block1" ? block1ActiveRecoveryFile : "";
 }
 
 function getBlock0ClauseQuestions() {
@@ -584,42 +566,128 @@ function getBlock0ClauseQuestions() {
   return Array.isArray(clause.questions) ? clause.questions : [];
 }
 
-function getBlock0CurrentQuestion() {
+function getBlock0BatchQuestions() {
+  return getBlock0ClauseQuestions().slice(0, BLOCK0_SLOT_KEYS.length);
+}
+
+function getBlock0IntegratedQuestion() {
   var questions = getBlock0ClauseQuestions();
-  if (questions.length === 0) {
+  return questions[BLOCK0_SLOT_KEYS.length] || null;
+}
+
+function getBlock0QuestionForSlot(slotKey) {
+  var slotIndex = BLOCK0_SLOT_KEYS.indexOf(String(slotKey || ""));
+  var questions = getBlock0BatchQuestions();
+  if (slotIndex < 0) {
     return null;
   }
-  return questions[state.block0QuestionIndex] || null;
+  return questions[slotIndex] || null;
+}
+
+function ensureBlock0ClauseAnswers() {
+  if (!state.block0ClauseAnswers || typeof state.block0ClauseAnswers !== "object") {
+    state.block0ClauseAnswers = {
+      purpose: "",
+      mapping: "",
+      design: "",
+    };
+  }
+  BLOCK0_SLOT_KEYS.forEach(function ensureSlot(key) {
+    if (typeof state.block0ClauseAnswers[key] !== "string") {
+      state.block0ClauseAnswers[key] = String(state.block0ClauseAnswers[key] || "");
+    }
+  });
+  return state.block0ClauseAnswers;
+}
+
+function getBlock0IntegratedAnswer() {
+  var integratedQuestion = getBlock0IntegratedQuestion();
+  return integratedQuestion ? String(integratedQuestion.answer || "") : "";
 }
 
 function getBlock0PatchTargetPresentation(question) {
   var prompt = question && question.prompt ? String(question.prompt) : "";
-  var parts = [];
-  var badgeText = "식 -";
-  var expressionText = prompt || "누락 식";
-  var badgeMatch = null;
+  var lines = [];
+  var fieldName = "필드";
+  var statusText = "미결정";
+  var valueText = "값:";
 
   if (!prompt) {
-    return { badgeText: badgeText, expressionText: "누락 식" };
+    return { fieldName: fieldName, statusText: statusText, valueText: valueText };
   }
 
-  parts = prompt.split(":");
-  if (parts.length > 1) {
-    badgeText = parts[0].trim().replace("누락 ", "");
-    expressionText = parts.slice(1).join(":").trim();
-  }
+  lines = prompt.split("\n").map(function trimLine(line) {
+    return String(line || "").trim();
+  }).filter(Boolean);
 
-  if (badgeText === "식 -") {
-    badgeMatch = prompt.match(/(식\s*[A-Za-z0-9가-힣]+)/);
-    if (badgeMatch) {
-      badgeText = badgeMatch[1];
+  if (lines[0]) {
+    fieldName = lines[0];
+  }
+  if (lines[1] && lines[1].indexOf("상태:") === 0) {
+    statusText = String(lines[1].slice("상태:".length) || "").trim() || statusText;
+  }
+  if (lines[2]) {
+    valueText = lines[2].replace(/\[\s*\??\s*\]/g, "").trim() || "값:";
+    if (!/[:→]$/.test(valueText)) {
+      valueText += ":";
     }
   }
 
   return {
-    badgeText: badgeText || "식 -",
-    expressionText: expressionText || prompt,
+    fieldName: fieldName,
+    statusText: statusText,
+    valueText: valueText,
   };
+}
+
+function parsePromptFormulaParts(question) {
+  var prompt = question && question.prompt ? String(question.prompt).trim() : "";
+  var placeholderMatch = prompt.match(/^(.*)\[\s*(?:\?+)?\s*\](.*)$/);
+  if (!prompt || prompt.indexOf("\n") !== -1 || !placeholderMatch) {
+    return null;
+  }
+  return {
+    prefix: String(placeholderMatch[1] || "").trim(),
+    suffix: String(placeholderMatch[2] || "").trim(),
+  };
+}
+
+function getBlock0BatchStatus() {
+  var answers = ensureBlock0ClauseAnswers();
+  var integratedAnswer = getBlock0IntegratedAnswer();
+  var slotViews = BLOCK0_SLOT_KEYS.map(function buildSlotView(slotKey) {
+    var question = getBlock0QuestionForSlot(slotKey);
+    var expectedAnswer = question ? String(question.answer || "") : "";
+    var currentValue = String(answers[slotKey] || "");
+    return {
+      slotKey: slotKey,
+      question: question,
+      expectedAnswer: expectedAnswer,
+      currentValue: currentValue,
+      filled: Boolean(currentValue),
+      match: Boolean(currentValue) && Boolean(expectedAnswer) && currentValue === expectedAnswer,
+      mismatch: Boolean(currentValue) && Boolean(expectedAnswer) && currentValue !== expectedAnswer,
+    };
+  });
+  var allFilled = slotViews.length > 0 && slotViews.every(function isFilled(slotView) {
+    return slotView.filled;
+  });
+  var allCorrect = slotViews.length > 0 && slotViews.every(function isCorrect(slotView) {
+    return slotView.match;
+  });
+
+  return {
+    slotViews: slotViews,
+    allFilled: allFilled,
+    allCorrect: allCorrect,
+    integratedAnswer: integratedAnswer,
+  };
+}
+
+function getFileNameFromPath(path) {
+  var text = String(path || "");
+  var lastSlash = text.lastIndexOf("/");
+  return lastSlash >= 0 ? text.slice(lastSlash + 1) : text;
 }
 
 function setBlock0ContextFile(path) {
@@ -731,17 +799,13 @@ function hasOpenPuzzlePreview(prefix) {
 
 function buildWorkbenchActionViewModel(prefix) {
   var spec = getPuzzleSpec(prefix);
-  var currentQuestion = getPuzzleCurrentQuestion(prefix);
-  var currentAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
-  var currentPurpose = state[prefix + "PurposeValue"] || "";
   var collectedTags = state[prefix + "CollectedTags"];
-  var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var hasOpenPreview = hasOpenPuzzlePreview(prefix);
-  var questionTitle = activeRecoveryFile ? ("목표: " + currentQuestion.prompt) : ("대상 준비: " + (spec.title || "복구 단계"));
-  var block0TargetFile = getBlock0CurrentTargetFileName();
-  var block0Rule = getBlock0UnlockRuleByFile(block0TargetFile);
-  var block0Requirement = block0Rule ? String(block0Rule.whenTag || "") : "";
-  var block0TargetReady = prefix === "block0" ? isBlock0UnlockRuleSatisfied(block0TargetFile) : false;
+  var batchStatus = prefix === "block0" ? getBlock0BatchStatus() : null;
+  var block1CurrentQuestion = prefix === "block1" ? getPuzzleCurrentQuestion(prefix) : null;
+  var currentAnswer = block1CurrentQuestion ? String(block1CurrentQuestion.answer || "") : "";
+  var currentPurpose = state[prefix + "PurposeValue"] || "";
+  var questionTitle = block1CurrentQuestion ? (String(block1CurrentQuestion.prompt || "").split("\n")[0] || "상태 복구") : ((spec.title || "복구 단계") + " / 대기");
   if (state.phase !== FLOW_PHASE.STREAMING) {
     return {
       toneClass: "",
@@ -749,6 +813,85 @@ function buildWorkbenchActionViewModel(prefix) {
       title: "세션 분리됨",
       body: "로그인 후 세션이 연결됩니다.",
       isHidden: false,
+      ctaLabel: "",
+      ctaAction: "",
+    };
+  }
+
+  if (prefix === "block0") {
+    if (state.block0Completed) {
+      return {
+        toneClass: "is-resolved",
+        stateLabel: "RESOLVED",
+        title: "복구 완료",
+        body: "통합 상태가 복원되었습니다.",
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    if (block0AnswerRecoveryActive) {
+      return {
+        toneClass: "is-processing",
+        stateLabel: "검증",
+        title: "일괄 복구 검증 중",
+        body: "세 필드 정합성과 통합 상태를 재조립하고 있습니다.",
+        progressLabel: state.block0PipelineStage || "검사 준비 중",
+        progressValue: state.block0PipelineProgress || 0,
+        isHidden: false,
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    if (state.block0MemoryUnlocked && !state.block1Started) {
+      return {
+        toneClass: "is-resolved",
+        stateLabel: "다음",
+        title: "다음 복구 준비 완료",
+        body: "block-1 폴더가 열렸습니다.",
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    if (batchStatus && batchStatus.allFilled && !batchStatus.allCorrect) {
+      return {
+        toneClass: "is-warning",
+        stateLabel: "MISMATCH",
+        title: "일괄 복구 불일치",
+        body: "세 슬롯 중 하나 이상이 맞지 않습니다.",
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    if (batchStatus && batchStatus.allFilled && batchStatus.allCorrect) {
+      return {
+        toneClass: "is-ready",
+        stateLabel: "READY",
+        title: "복구 조건 충족",
+        body: "세 필드 값이 모두 맞았습니다.",
+        progressLabel: "",
+        progressValue: 0,
+        isHidden: false,
+        ctaLabel: "",
+        ctaAction: "",
+      };
+    }
+    return {
+      toneClass: "",
+      stateLabel: "",
+      title: "",
+      body: "",
+      progressLabel: "",
+      progressValue: 0,
+      isHidden: true,
       ctaLabel: "",
       ctaAction: "",
     };
@@ -811,36 +954,10 @@ function buildWorkbenchActionViewModel(prefix) {
   }
 
   if (!state[prefix + "ClauseVisible"]) {
-    if (prefix === "block0" && block0TargetReady) {
-      return {
-        toneClass: "",
-        stateLabel: "마운트",
-        title: "복구 가능 파일을 작업대로 가져오세요.",
-        body: "",
-        progressLabel: "",
-        progressValue: 0,
-        isHidden: false,
-        ctaLabel: "",
-        ctaAction: "",
-      };
-    }
-    if (prefix === "block0" && hasOpenPreview) {
-      return {
-        toneClass: "",
-        stateLabel: "탐색",
-        title: "증거를 확인해 복구 파일을 준비하세요.",
-        body: block0Requirement ? ("잠금 조건 조각: " + block0Requirement) : "",
-        progressLabel: "",
-        progressValue: 0,
-        isHidden: false,
-        ctaLabel: "",
-        ctaAction: "",
-      };
-    }
     return {
       toneClass: "",
       stateLabel: "대기",
-      title: "증거를 확인해 복구 파일을 준비하세요.",
+      title: "상태 파편 대기",
       body: "",
       progressLabel: "",
       progressValue: 0,
@@ -850,12 +967,12 @@ function buildWorkbenchActionViewModel(prefix) {
     };
   }
 
-  if (!currentQuestion) {
+  if (!block1CurrentQuestion) {
     return {
       toneClass: "",
-      stateLabel: "확인",
-      title: "현재 식 확인",
-      body: "증거와 조각을 다시 확인하세요.",
+      stateLabel: "HOLD",
+      title: "활성 필드 없음",
+      body: "상태 입력 대기",
       progressLabel: "",
       progressValue: 0,
       isHidden: false,
@@ -867,9 +984,9 @@ function buildWorkbenchActionViewModel(prefix) {
   if (currentPurpose && currentAnswer && currentPurpose !== currentAnswer) {
     return {
       toneClass: "is-warning",
-      stateLabel: "오류",
-      title: "다른 조각이 필요합니다",
-      body: currentPurpose + "는 현재 식과 맞지 않습니다.",
+      stateLabel: "MISMATCH",
+      title: "값 불일치",
+      body: "현재 입력값: " + currentPurpose,
       progressLabel: "",
       progressValue: 0,
       isHidden: false,
@@ -881,9 +998,9 @@ function buildWorkbenchActionViewModel(prefix) {
   if (prefix === "block1" && !hasOpenPreview && state.block1VisibleFiles.length > 0 && collectedTags.length === 0) {
     return {
       toneClass: "",
-      stateLabel: "탐색",
-      title: "열린 로그 확인",
-      body: "새로 열린 로그에서 조각을 수집하세요.",
+      stateLabel: "SCAN",
+      title: "로그 파편 열림",
+      body: "수집 가능한 값 대기",
       progressLabel: "",
       progressValue: 0,
       isHidden: false,
@@ -895,9 +1012,9 @@ function buildWorkbenchActionViewModel(prefix) {
   if (!currentPurpose && currentAnswer && collectedTags.indexOf(currentAnswer) !== -1) {
     return {
       toneClass: "is-ready",
-      stateLabel: "준비",
-      title: "목표 조각 확보",
-      body: "목표 조각을 슬롯에 넣으세요.",
+      stateLabel: "READY",
+      title: "입력 가능",
+      body: "값 슬롯 사용 가능",
       progressLabel: "",
       progressValue: 0,
       isHidden: true,
@@ -908,7 +1025,7 @@ function buildWorkbenchActionViewModel(prefix) {
 
   return {
     toneClass: "",
-    stateLabel: "연결",
+    stateLabel: "LINK",
     title: questionTitle,
     body: "",
     progressLabel: "",
@@ -1424,13 +1541,18 @@ function setupBlockLifecycles() {
   block0Lifecycle = runBlockLifecycle(BLOCK0_SPEC, {
     reset: function resetBlock0(spec) {
       var lifecycle = spec.lifecycle || {};
-      var initialFile = lifecycle.startFile || Object.keys(spec.files)[0] || "";
+      var initialFiles = Object.keys(spec.files || {});
       state.block0Started = false;
       state.block0Completed = false;
       state.block0Integrity = spec.initialIntegrity;
-      state.block0VisibleFiles = [initialFile].filter(Boolean);
+      state.block0VisibleFiles = initialFiles.slice();
       state.block0CollectedTags = [];
-      state.block0ClauseVisible = false;
+      state.block0ClauseVisible = true;
+      state.block0ClauseAnswers = {
+        purpose: "",
+        mapping: "",
+        design: "",
+      };
       state.block0PurposeValue = "";
       state.block0QuestionIndex = 0;
       state.block0SolvedAnswers = [];
@@ -1440,7 +1562,9 @@ function setupBlockLifecycles() {
       state.block0DiscoveredRecipes = [];
       block0RecoveryMetaByFile = {};
       block0RecoveryRootMeta = null;
-      stampBlock0RecoveredFile(initialFile);
+      initialFiles.forEach(function stampVisibleFile(fileName) {
+        stampBlock0RecoveredFile(fileName);
+      });
     },
     onFileOpened: function onBlock0FileOpenedLifecycle(spec, path) {
       var lifecycle = spec.lifecycle || {};
@@ -1504,7 +1628,7 @@ function setupBlockLifecycles() {
           renderInvestigationPanel(formatLifecycleText(unlockSpec.panelMessageTemplate || "", { file: targetName }));
           renderBlock0Panel();
           logRecoveryEvent(formatLifecycleText(unlockSpec.logTemplate || "", { file: targetName }), unlockSpec.tone || "log-muted");
-          emitStateEvent("block1.file_unlocked", null, { fileName: targetName, mode: "timed" });
+          setRuntimeFsUnlockedEvent("block1", targetName, "timed");
         }, Math.max(0, Number(unlockSpec.delayMs) || 0));
         blockLifecycleTimers.push(timer);
       });
@@ -1541,7 +1665,7 @@ function setupBlockLifecycles() {
       renderInvestigationPanel(formatLifecycleText(onOpenUnlock.panelMessageTemplate || "", { file: nextName }));
       renderBlock0Panel();
       logRecoveryEvent(formatLifecycleText(onOpenUnlock.logTemplate || "", { file: nextName }), onOpenUnlock.tone || "log-muted");
-      emitStateEvent("block1.file_unlocked", null, { fileName: nextName, mode: "on-open" });
+      setRuntimeFsUnlockedEvent("block1", nextName, "on-open");
     },
   });
 }
@@ -1597,9 +1721,6 @@ function resetBlock0State() {
   block0AnswerRecoveryJob += 1;
   block0CurrentContext.file = "";
   block0CurrentContext.tag = "";
-  block0PendingRecoveryPrompt = null;
-  block0DraggedRecoveryFile = "";
-  block0ActiveRecoveryFile = "";
   block0DraggedTag = "";
   block0DraggedTagIndex = -1;
   pinnedInvestigationPreview = null;
@@ -1689,7 +1810,7 @@ function cacheElements() {
   elements.controls = document.getElementById("controls-panel");
   elements.authOverlay = document.getElementById("auth-overlay");
   elements.authForm = document.getElementById("auth-form");
-  elements.authConsentText = document.getElementById("auth-consent-text");
+  elements.authConsentButton = document.getElementById("auth-consent-button");
   elements.authError = document.getElementById("auth-error");
   elements.authStatus = document.getElementById("auth-status");
   elements.systemOverlay = document.getElementById("system-overlay");
@@ -1719,8 +1840,10 @@ function cacheElements() {
   elements.block0ClausePanel = document.getElementById("block0-clause-panel");
   elements.block0ClauseTitle = document.getElementById("block0-clause-title");
   elements.block0TargetBadge = document.getElementById("block0-target-badge");
-  elements.block0PurposeLabel = document.getElementById("block0-purpose-label");
-  elements.block0PurposeSlot = document.getElementById("block0-purpose-slot");
+  elements.block0ClauseFile = document.getElementById("block0-clause-file");
+  elements.block0ClauseGrid = document.getElementById("block0-clause-grid");
+  elements.block0ClauseOutput = document.getElementById("block0-clause-output");
+  elements.block0IntegratedValue = document.getElementById("block0-integrated-value");
   elements.block0ProfilePanel = document.getElementById("block0-profile-panel");
   elements.block0ProfileCard = document.getElementById("block0-profile-card");
   elements.block0MemoryModal = document.getElementById("block0-memory-modal");
@@ -1739,16 +1862,10 @@ function bindInputEvents() {
   if (elements.investigationContent) {
     elements.investigationContent.addEventListener("click", handleInvestigationPreviewClick);
   }
-  if (elements.block0PurposeSlot) {
-    elements.block0PurposeSlot.addEventListener("click", handleBlock0PurposeSlotClick);
-    elements.block0PurposeSlot.addEventListener("dragover", handleBlock0PurposeSlotDragOver);
-    elements.block0PurposeSlot.addEventListener("drop", handleBlock0PurposeSlotDrop);
-  }
-  if (elements.block0ActionCard) {
-    elements.block0ActionCard.addEventListener("dragenter", handleWorkbenchRecoveryDragEnter);
-    elements.block0ActionCard.addEventListener("dragover", handleWorkbenchRecoveryDragOver);
-    elements.block0ActionCard.addEventListener("dragleave", handleWorkbenchRecoveryDragLeave);
-    elements.block0ActionCard.addEventListener("drop", handleWorkbenchRecoveryDrop);
+  if (elements.block0ClauseGrid) {
+    elements.block0ClauseGrid.addEventListener("click", handleBlock0ClauseSlotClick);
+    elements.block0ClauseGrid.addEventListener("dragover", handleBlock0ClauseSlotDragOver);
+    elements.block0ClauseGrid.addEventListener("drop", handleBlock0ClauseSlotDrop);
   }
   if (elements.block0TagInventory) {
     elements.block0TagInventory.addEventListener("dragstart", handleBlock0InventoryDragStart);
@@ -1769,6 +1886,9 @@ function bindInputEvents() {
   }
   if (elements.authForm) {
     elements.authForm.addEventListener("submit", handleAuthFormSubmit);
+  }
+  if (elements.authConsentButton) {
+    elements.authConsentButton.addEventListener("click", handleAuthConsentButtonClick);
   }
   if (elements.log) {
     elements.log.addEventListener("scroll", handleLogScroll);
@@ -1833,10 +1953,37 @@ function beginFtpAuthFlow() {
   if (elements.authForm) {
     elements.authForm.reset();
   }
+  renderAuthConsentState();
   flushRecoveryShellDigest();
-  if (elements.authConsentText) {
-    elements.authConsentText.focus();
+  if (elements.authConsentButton) {
+    elements.authConsentButton.focus();
   }
+}
+
+function handleAuthConsentButtonClick() {
+  if (state.phase !== FLOW_PHASE.LOGIN_REQUIRED) {
+    return;
+  }
+
+  var accepted = !state.authConsentAccepted;
+  setAuthConsentAcceptedState(state, accepted);
+  setAuthCardMode("");
+  renderAuthConsentState();
+
+  if (elements.authError) {
+    elements.authError.textContent = "";
+  }
+
+  if (accepted) {
+    setAuthCardMode("");
+    setAuthStatus("동의 확인됨");
+  } else {
+    setAuthStatus("열람 동의 대기");
+  }
+
+  emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_CONSENT_UPDATED, null, {
+    accepted: accepted,
+  });
 }
 
 /**
@@ -1850,39 +1997,19 @@ function handleAuthFormSubmit(submitEvent) {
     return;
   }
 
-  var consentText = elements.authConsentText ? String(elements.authConsentText.value || "").trim() : "";
-  var normalizedConsent = consentText.replace(/\s+/g, "");
-  var requiredConsent = "동의합니다.";
-
-  if (!consentText) {
+  if (!state.authConsentAccepted) {
     setAuthCardMode("is-error");
-    setAuthStatus("확인 문구 필요");
+    setAuthStatus("동의 필요");
     emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_ERROR, null, {
-      reason: "missing-consent-text",
+      reason: "missing-consent-ack",
     });
     if (elements.authError) {
-      elements.authError.textContent = "'동의합니다.'를 입력해주세요.";
+      elements.authError.textContent = "열람 동의 버튼을 눌러주세요.";
     }
     scheduleRuntimeTimeout(function resetAuthPrompt() {
       setAuthCardMode("");
       setAuthStatus("열람 동의 대기");
     }, 260, "auth-reset-prompt");
-    return;
-  }
-
-  if (normalizedConsent !== requiredConsent) {
-    setAuthCardMode("is-error");
-    setAuthStatus("동의 필요");
-    emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_ERROR, null, {
-      reason: "mismatch-consent-text",
-    });
-    if (elements.authError) {
-      elements.authError.textContent = "확인 문구가 정확하지 않습니다. '동의합니다.'를 그대로 입력해주세요.";
-    }
-    scheduleRuntimeTimeout(function resetAuthConsentPrompt() {
-      setAuthCardMode("");
-      setAuthStatus("열람 동의 대기");
-    }, 260, "auth-reset-consent");
     return;
   }
 
@@ -1942,13 +2069,32 @@ function setAuthCardMode(mode) {
 
 /** 접근 동의 입력필드/버튼 비활성화 제어. */
 function setAuthFormEnabled(enabled) {
-  if (elements.authConsentText) {
-    elements.authConsentText.disabled = !enabled;
+  if (elements.authConsentButton) {
+    elements.authConsentButton.disabled = !enabled;
   }
   if (elements.authForm) {
     var submit = elements.authForm.querySelector(".auth-submit");
     if (submit) {
-      submit.disabled = !enabled;
+      submit.disabled = !enabled || !state.authConsentAccepted;
+    }
+  }
+}
+
+function renderAuthConsentState() {
+  if (!elements.authConsentButton) {
+    return;
+  }
+
+  var accepted = Boolean(state.authConsentAccepted);
+  elements.authConsentButton.setAttribute("aria-pressed", accepted ? "true" : "false");
+  elements.authConsentButton.textContent = accepted
+    ? "주의 사항 확인 완료. 다시 누르면 동의를 해제합니다."
+    : "주의 사항을 확인했고 동의합니다.";
+
+  if (elements.authForm) {
+    var submit = elements.authForm.querySelector(".auth-submit");
+    if (submit) {
+      submit.disabled = elements.authConsentButton.disabled || !accepted;
     }
   }
 }
@@ -2387,14 +2533,9 @@ function getFsChildrenRows(cwd, entry) {
   var block0Root = BLOCK0_SPEC.rootPath;
   var block0AllFiles = Object.keys(BLOCK0_SPEC.files || {});
   var visibleSet = {};
-  var hidden = [];
+  var block1Root = BLOCK1_SPEC.rootPath;
+  var block1AllFiles = Object.keys(BLOCK1_SPEC.files || {});
   var index = 0;
-  var nextRecoverableFile = "";
-  var questionTargetFile = "";
-  var currentQuestion = null;
-  var currentRequirementTag = "";
-  var targetRule = null;
-  var isTargetReady = false;
 
   if (cwd === block0Root && !state.block0Completed) {
     state.block0VisibleFiles.forEach(function markVisible(fileName) {
@@ -2415,46 +2556,13 @@ function getFsChildrenRows(cwd, entry) {
         type: visibleType,
         ext: visibleType === "dir" ? "" : getFileExt(visibleName),
         meta: Object.assign({}, LOG_META[visiblePath] || {}, {
-          recovered: true,
+          recovered: false,
           attr:
             ((LOG_META[visiblePath] || {}).attr || "RO,LOG") +
             (previewFilePath === visiblePath ? ",OPENED" : ""),
         }),
       });
       }
-      index += 1;
-    }
-
-    hidden = block0AllFiles.filter(function onlyLocked(fileName) {
-      return !visibleSet[fileName];
-    });
-    questionTargetFile = getBlock0CurrentTargetFileName();
-    targetRule = getBlock0UnlockRuleByFile(questionTargetFile);
-    isTargetReady = isBlock0UnlockRuleSatisfied(questionTargetFile);
-    nextRecoverableFile = isTargetReady ? (questionTargetFile || getNextRecoverableBlock0FileName()) : "";
-    currentQuestion = getBlock0CurrentQuestion();
-    currentRequirementTag = targetRule ? String(targetRule.whenTag || "") : "";
-    index = 0;
-    while (index < hidden.length) {
-      var hiddenName = hidden[index];
-      var isRecoverable = Boolean(nextRecoverableFile) && hiddenName === nextRecoverableFile;
-      rows.push({
-        name: hiddenName,
-        path: BLOCK0_SPEC.files[hiddenName].path,
-        type: "file",
-        ext: getFileExt(hiddenName),
-        meta: {
-          date: "--.--.--",
-          time: "--:--",
-          attr: (isRecoverable ? "LOCK,READY" : "LOCK,BLOCKED") + (block0ActiveRecoveryFile === hiddenName ? ",MOUNTED" : ""),
-          locked: true,
-          recoverable: isRecoverable,
-          blocked: !isRecoverable,
-          mounted: block0ActiveRecoveryFile === hiddenName,
-          requiredTag: isRecoverable ? currentRequirementTag : "",
-          requiredFile: !isRecoverable ? questionTargetFile : "",
-        },
-      });
       index += 1;
     }
 
@@ -2469,6 +2577,33 @@ function getFsChildrenRows(cwd, entry) {
           attr: state.block1Started ? ((LOG_META[normalizePath(cwd + "/block-1")] || {}).attr || "DIR,RO") : "DIR,NEXT",
         }),
       });
+    }
+    return rows;
+  }
+
+  if (cwd === block1Root && state.block1Started) {
+    state.block1VisibleFiles.forEach(function markBlock1Visible(fileName) {
+      visibleSet[fileName] = true;
+    });
+    index = 0;
+    while (index < block1AllFiles.length) {
+      var block1Name = block1AllFiles[index];
+      var block1Path = BLOCK1_SPEC.files[block1Name].path;
+      var isUnlocked = Boolean(visibleSet[block1Name]);
+      rows.push({
+        name: block1Name,
+        path: block1Path,
+        type: "file",
+        ext: getFileExt(block1Name),
+        meta: Object.assign({}, LOG_META[block1Path] || {}, {
+          attr:
+            "RO," + (isUnlocked ? "UNLOCKED" : "LOCKED") +
+            (previewFilePath === block1Path ? ",OPENED" : ""),
+          locked: !isUnlocked,
+          recovered: isUnlocked,
+        }),
+      });
+      index += 1;
     }
     return rows;
   }
@@ -2602,6 +2737,10 @@ function resolveReadableFile(path) {
     logWarn("cat: file locked until prior tag recovery");
     return null;
   }
+  if (block1FileByPath[resolved.path] && state.block1VisibleFiles.indexOf(fileName) === -1) {
+    logWarn("cat: file locked");
+    return null;
+  }
 
   return resolved;
 }
@@ -2612,7 +2751,7 @@ function buildInvestigationPanelViewModel(message) {
   var entry = LOG_FS[cwd];
   var isStreaming = state.phase === FLOW_PHASE.STREAMING;
   var rows = [];
-  var block0AllRecovered = state.block0VisibleFiles.length >= Object.keys(BLOCK0_SPEC.files || {}).length;
+  var block0AllRecovered = Boolean(state.block0Completed);
 
   if (!isStreaming) {
     return {
@@ -2765,25 +2904,14 @@ function handleInvestigationItemClick(clickEvent) {
   var path = target.dataset.path;
   var kind = target.dataset.kind || "";
   var isLocked = target.dataset.locked === "true";
-  var recoveryState = target.dataset.recoveryState || "none";
-  var requiredTag = String(target.dataset.requiredTag || "");
-  var requiredFile = String(target.dataset.requiredFile || "");
-  var fileName = path.split("/").pop() || "대상 파일";
   if (isLocked) {
     markInvestigationRowLoading(target, false);
-    if (recoveryState === "recoverable") {
-      return;
-    }
-    clearBlock0RecoveryArm();
-    block0DraggedRecoveryFile = "";
-    logWarn("복구 불가: " + (requiredFile || "선행 조각") + " 확인 필요");
+    logWarn("잠금 상태: 아직 열 수 없는 파일입니다.");
     return;
   }
   markInvestigationRowLoading(target, kind === "file");
 
   if (kind === "dir") {
-    clearBlock0RecoveryArm();
-    block0DraggedRecoveryFile = "";
     if (normalizePath(path) === BLOCK1_SPEC.rootPath && state.block0MemoryUnlocked && !state.block1Started) {
       startBlock1FromMemory();
       return;
@@ -2793,50 +2921,18 @@ function handleInvestigationItemClick(clickEvent) {
   }
 
   if (kind === "file") {
-    clearBlock0RecoveryArm();
-    block0DraggedRecoveryFile = "";
     readFile(path);
   }
 }
 
 function handleInvestigationItemDragStart(dragEvent) {
-  var target = dragEvent.target ? dragEvent.target.closest(".investigation-item") : null;
-  var fileName = "";
-  var requiredTag = "";
-  var currentQuestion = null;
-
-  if (!target || target.dataset.draggableRecovery !== "true" || target.dataset.recoveryState !== "recoverable") {
-    if (dragEvent.preventDefault) {
-      dragEvent.preventDefault();
-    }
-    return;
+  if (dragEvent.preventDefault) {
+    dragEvent.preventDefault();
   }
-
-  fileName = String(target.dataset.path || "").split("/").pop() || "대상 파일";
-  requiredTag = String(target.dataset.requiredTag || "");
-  currentQuestion = getBlock0CurrentQuestion();
-  armBlock0Recovery(fileName, requiredTag, currentQuestion ? String(currentQuestion.prompt || "") : "");
-  block0DraggedRecoveryFile = fileName;
-  if (dragEvent.dataTransfer) {
-    dragEvent.dataTransfer.effectAllowed = "move";
-    dragEvent.dataTransfer.setData("text/plain", fileName);
-  }
-  if (elements.block0ActionCard) {
-    elements.block0ActionCard.classList.add("is-drop-target");
-  }
-  touchPuzzleActivity("block0");
-  renderBlock0Panel();
 }
 
 function handleInvestigationItemDragEnd() {
-  block0DraggedRecoveryFile = "";
-  if (!state.block0ClauseVisible) {
-    clearBlock0RecoveryArm();
-  }
-  if (elements.block0ActionCard) {
-    elements.block0ActionCard.classList.remove("is-drop-target", "is-drop-active");
-  }
-  renderBlock0Panel();
+  return;
 }
 
 /** ls 구현: 디렉터리 내용을 터미널에 출력하고 패널을 갱신한다. */
@@ -2992,15 +3088,9 @@ function touchBlock0Activity() {
 function buildBlock0PanelViewModel() {
   var prefix = getActivePuzzlePrefix();
   var spec = getPuzzleSpec(prefix);
-  var questions = getPuzzleQuestions(prefix);
-  var totalQuestions = questions.length;
-  var currentQuestion = getPuzzleCurrentQuestion(prefix);
-  var patchTarget = getBlock0PatchTargetPresentation(currentQuestion);
-  var currentAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
   var solvedAnswers = state[prefix + "SolvedAnswers"];
   var collectedTags = state[prefix + "CollectedTags"];
-  var currentPurpose = state[prefix + "PurposeValue"] || "";
-  var solvedCount = Array.isArray(solvedAnswers) ? solvedAnswers.length : 0;
+  var batchStatus = prefix === "block0" ? getBlock0BatchStatus() : null;
   var fusionNeededTypes = block0FusionDraft.expectedTypes.filter(function pickNeeded(_, idx) {
     return !block0FusionDraft.args[idx];
   });
@@ -3027,7 +3117,6 @@ function buildBlock0PanelViewModel() {
     };
   });
   var isBlock0 = prefix === "block0";
-  var activeRecoveryFile = getPuzzleCurrentRecoveryFile(prefix);
   var blockTitle = spec.title || (isBlock0 ? "복구 블록 0" : "복구 블록");
   var action = buildWorkbenchActionViewModel(prefix);
   var previewSpec = (isBlock0 && previewFilePath && block0FileByPath[previewFilePath]) ? block0FileByPath[previewFilePath] : null;
@@ -3040,14 +3129,51 @@ function buildBlock0PanelViewModel() {
       (isBlock0 && block0AnswerRecoveryActive ? " · pipeline active" : ""),
     action: action,
     tags: tags,
-    clauseTitle: (((spec.clause || {}).title || spec.title || "repair clause")) + (activeRecoveryFile ? (" · " + activeRecoveryFile) : ""),
-    clauseTargetBadge: currentQuestion ? patchTarget.badgeText : "완료",
+    clauseTitle: isBlock0 ? "" : (((spec.clause || {}).title || spec.title || "field state")),
+    clauseTargetBadge: isBlock0 ? "3개 상태 복구" : "단일 상태 복구",
+    clauseFileName: isBlock0 ? "증거 파일을 읽고 아래 필드에 값을 배치하세요." : (getPuzzleCurrentRecoveryFile(prefix) ? getFileNameFromPath(getPuzzleCurrentRecoveryFile(prefix)) : ""),
     clauseVisible: state[prefix + "ClauseVisible"],
-    clauseGoalReady: state[prefix + "ClauseVisible"] && !state[prefix + "Completed"] && Boolean(currentAnswer) && collectedTags.indexOf(currentAnswer) !== -1,
+    clauseGoalReady: isBlock0
+      ? Boolean(batchStatus && batchStatus.allFilled && batchStatus.allCorrect)
+      : Boolean(getPuzzleCurrentQuestion(prefix) && state[prefix + "PurposeValue"] === String((getPuzzleCurrentQuestion(prefix) || {}).answer || "")),
     clauseCompleted: state[prefix + "Completed"],
-    purposeLabel: currentQuestion ? patchTarget.expressionText : (spec.title + " 복구 완료"),
-    purposeValue: currentPurpose,
-    purposeMatch: Boolean(currentPurpose) && Boolean(currentAnswer) && currentPurpose === currentAnswer,
+    batchSlots: isBlock0 && batchStatus ? batchStatus.slotViews.map(function toBatchSlot(slotView) {
+      var presentation = getBlock0PatchTargetPresentation(slotView.question);
+      var formulaParts = parsePromptFormulaParts(slotView.question);
+      return {
+        slotKey: slotView.slotKey,
+        fieldName: presentation.fieldName,
+        statusText: presentation.statusText,
+        valueText: presentation.valueText,
+        formulaParts: formulaParts,
+        currentValue: slotView.currentValue,
+        filled: slotView.filled,
+        match: slotView.match,
+        mismatch: slotView.mismatch,
+      };
+    }) : (function buildSingleSlot() {
+      var currentQuestion = getPuzzleCurrentQuestion(prefix);
+      var presentation = getBlock0PatchTargetPresentation(currentQuestion);
+      var currentValue = String(state[prefix + "PurposeValue"] || "");
+      var expectedValue = currentQuestion ? String(currentQuestion.answer || "") : "";
+      if (!currentQuestion) {
+        return [];
+      }
+      return [{
+        slotKey: "single",
+        fieldName: presentation.fieldName,
+        statusText: presentation.statusText,
+        valueText: presentation.valueText,
+        currentValue: currentValue,
+        filled: Boolean(currentValue),
+        match: Boolean(currentValue) && currentValue === expectedValue,
+        mismatch: Boolean(currentValue) && currentValue !== expectedValue,
+      }];
+    })(),
+    integratedVisible: Boolean(isBlock0),
+    integratedValue: batchStatus ? batchStatus.integratedAnswer : "",
+    integratedFormulaParts: isBlock0 ? parsePromptFormulaParts(getBlock0IntegratedQuestion()) : null,
+    integratedResolved: Boolean(isBlock0 && batchStatus && batchStatus.allCorrect && state.block0Completed),
     fusion: {
       operator: block0FusionDraft.operator,
       slots: fusionSlots,
@@ -3077,6 +3203,44 @@ function renderProfileCardHtml(profile) {
   );
 }
 
+function renderBlock0BatchSlotHtml(slotView) {
+  var slotClasses = "block0-tag-slot block0-slot clause-value";
+  var formulaParts = slotView.formulaParts;
+  if (slotView.filled) {
+    slotClasses += " filled";
+  } else {
+    slotClasses += " expecting";
+  }
+  if (slotView.mismatch) {
+    slotClasses += " mismatch";
+  }
+  if (formulaParts) {
+    return (
+      '<div class="block0-clause-field equation" data-slot-key="' + slotView.slotKey + '">' +
+      '<div class="block0-clause-equation">' +
+      '<span class="block0-clause-equation-prefix">' + formulaParts.prefix + "</span>" +
+      '<button type="button" class="' + slotClasses + '" data-slot-key="' + slotView.slotKey + '">' +
+      (slotView.currentValue ? "[" + slotView.currentValue + "]" : "[       ]") +
+      "</button>" +
+      (formulaParts.suffix ? '<span class="block0-clause-equation-suffix">' + formulaParts.suffix + "</span>" : "") +
+      "</div>" +
+      "</div>"
+    );
+  }
+  return (
+    '<div class="block0-clause-field" data-slot-key="' + slotView.slotKey + '">' +
+    '<div class="block0-clause-field-head">' +
+    '<span class="block0-clause-field-title">' + slotView.fieldName + "</span>" +
+    '<span class="block0-clause-field-state">' + slotView.statusText + "</span>" +
+    "</div>" +
+    '<div class="block0-clause-field-value-label">' + slotView.valueText + "</div>" +
+    '<button type="button" class="' + slotClasses + '" data-slot-key="' + slotView.slotKey + '">' +
+    (slotView.currentValue ? "[" + slotView.currentValue + "]" : "[값 누락]") +
+    "</button>" +
+    "</div>"
+  );
+}
+
 function renderBlock0Panel() {
   var vm = buildBlock0PanelViewModel();
 
@@ -3089,10 +3253,7 @@ function renderBlock0Panel() {
       elements.block0ActionCard.classList.add(vm.action.toneClass);
     }
     elements.block0ActionCard.classList.toggle("is-hidden", Boolean(vm.action && vm.action.isHidden));
-    elements.block0ActionCard.classList.toggle(
-      "is-drop-target",
-      Boolean(getActivePuzzlePrefix() === "block0" && !state.block0ClauseVisible && isBlock0UnlockRuleSatisfied(getBlock0CurrentTargetFileName()))
-    );
+    elements.block0ActionCard.classList.remove("is-drop-target", "is-drop-active");
   }
   if (elements.block0ActionState) {
     elements.block0ActionState.textContent = vm.action ? vm.action.stateLabel : "";
@@ -3193,26 +3354,31 @@ function renderBlock0Panel() {
   }
   if (elements.block0ClauseTitle) {
     elements.block0ClauseTitle.textContent = vm.clauseTitle;
+    elements.block0ClauseTitle.classList.toggle("is-hidden", !vm.clauseTitle);
   }
   if (elements.block0TargetBadge) {
     elements.block0TargetBadge.textContent = vm.clauseTargetBadge;
   }
-  if (elements.block0PurposeLabel) {
-    elements.block0PurposeLabel.textContent = vm.purposeLabel;
+  if (elements.block0ClauseFile) {
+    elements.block0ClauseFile.textContent = vm.clauseFileName || "";
   }
-  if (elements.block0PurposeSlot) {
-    elements.block0PurposeSlot.disabled = block0AnswerRecoveryActive;
-    if (!vm.purposeValue) {
-      elements.block0PurposeSlot.textContent = "[태그를 드롭]";
-      elements.block0PurposeSlot.classList.remove("filled");
-      elements.block0PurposeSlot.classList.remove("mismatch");
-      elements.block0PurposeSlot.classList.add("expecting");
+  if (elements.block0ClauseGrid) {
+    elements.block0ClauseGrid.innerHTML = vm.batchSlots.map(renderBlock0BatchSlotHtml).join("");
+  }
+  if (elements.block0ClauseOutput) {
+    elements.block0ClauseOutput.classList.toggle("is-hidden", !vm.integratedVisible);
+  }
+  if (elements.block0IntegratedValue) {
+    elements.block0IntegratedValue.disabled = true;
+    if (vm.integratedFormulaParts) {
+      elements.block0IntegratedValue.textContent = vm.integratedResolved
+        ? (vm.integratedFormulaParts.prefix + " [" + vm.integratedValue + "]")
+        : (vm.integratedFormulaParts.prefix + " [       ]");
     } else {
-      elements.block0PurposeSlot.textContent = "[" + vm.purposeValue + "]";
-      elements.block0PurposeSlot.classList.add("filled");
-      elements.block0PurposeSlot.classList.remove("expecting");
-      elements.block0PurposeSlot.classList.toggle("mismatch", !vm.purposeMatch);
+      elements.block0IntegratedValue.textContent = vm.integratedResolved ? "[" + vm.integratedValue + "]" : "[자동 계산 대기]";
     }
+    elements.block0IntegratedValue.classList.toggle("filled", Boolean(vm.integratedResolved));
+    elements.block0IntegratedValue.classList.toggle("expecting", !vm.integratedResolved);
   }
   if (elements.block0ProfilePanel) {
     elements.block0ProfilePanel.classList.toggle("is-hidden", !vm.profile);
@@ -3257,10 +3423,11 @@ function pulseBlock0Clause(className) {
   }, 720, "clause-pulse-clear");
 }
 
-function setRuntimeFsUnlockedEvent(fileName) {
+function setRuntimeFsUnlockedEvent(prefix, fileName, mode) {
   emitStateEvent("fs.file_unlocked", null, {
-    prefix: "block0",
+    prefix: String(prefix || ""),
     fileName: String(fileName || ""),
+    mode: String(mode || ""),
   });
 }
 
@@ -3281,7 +3448,7 @@ function unlockBlock0File(fileName, panelMessage, logText, tone) {
   } else {
     logRecoveryEvent("archive entry restored: " + fileName, detailTone);
   }
-  setRuntimeFsUnlockedEvent(fileName);
+  setRuntimeFsUnlockedEvent("block0", fileName, "immediate");
   scheduleRuntimeTimeout(function markUnlockedRow() {
     if (!elements.investigationList) {
       return;
@@ -3301,7 +3468,6 @@ function unlockBlock0File(fileName, panelMessage, logText, tone) {
 function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
   var jobId = block0AnswerRecoveryJob + 1;
   var questionId = currentQuestion && currentQuestion.id ? currentQuestion.id : "Q0";
-  var recoverFile = getBlock0CurrentTargetFileName() || getNextRecoverableBlock0FileName();
   var finish = function finishPipeline() {
     if (jobId !== block0AnswerRecoveryJob) {
       return;
@@ -3344,11 +3510,7 @@ function runBlock0AnswerRecoveryPipeline(currentQuestion, done) {
     }
     setBlock0PipelineStage("패치 반영", 1);
     renderBlock0Panel();
-    if (recoverFile) {
-      unlockBlock0File(recoverFile, "패치 재조립: " + recoverFile);
-    } else {
-      renderInvestigationPanel();
-    }
+    renderInvestigationPanel();
   }, 1580);
   scheduleBlockLifecycleTimer(function finishRecoveryPipeline() {
     flushRecoveryShellDigest();
@@ -3435,8 +3597,13 @@ function clearBlock0FusionSlotHoverState() {
 }
 
 function finalizeBlock0DragOperation() {
-  if (elements.block0PurposeSlot) {
-    elements.block0PurposeSlot.classList.remove("is-drop-hover");
+  if (elements.block0ClauseGrid) {
+    var hoveredSlots = elements.block0ClauseGrid.querySelectorAll(".block0-slot.is-drop-hover");
+    var hoveredIndex = 0;
+    while (hoveredIndex < hoveredSlots.length) {
+      hoveredSlots[hoveredIndex].classList.remove("is-drop-hover");
+      hoveredIndex += 1;
+    }
   }
   block0DraggedTag = "";
   block0DraggedTagIndex = -1;
@@ -3639,50 +3806,78 @@ function handleBlock0InventoryDragEnd() {
   finalizeBlock0DragOperation();
 }
 
-/** 목적 슬롯 dragover 처리. */
-function handleBlock0PurposeSlotDragOver(dragEvent) {
-  if (!elements.block0PurposeSlot || elements.block0PurposeSlot.disabled || block0AnswerRecoveryActive) {
+function tryExecuteBlock0Batch() {
+  var batchStatus = getBlock0BatchStatus();
+  if (state.block0Completed || block0AnswerRecoveryActive || !batchStatus.allFilled || !batchStatus.allCorrect) {
+    return;
+  }
+  handleBlock0ExecuteClick();
+}
+
+/** block0 일괄 복구 슬롯 dragover 처리. */
+function handleBlock0ClauseSlotDragOver(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var prefix = getActivePuzzlePrefix();
+  if (!slot || block0AnswerRecoveryActive || state[prefix + "Completed"] || !state[prefix + "ClauseVisible"]) {
     return;
   }
   dragEvent.preventDefault();
   if (dragEvent.dataTransfer) {
     dragEvent.dataTransfer.dropEffect = "copy";
   }
-  elements.block0PurposeSlot.classList.add("is-drop-hover");
+  slot.classList.add("is-drop-hover");
 }
 
-/**
- * 목적 슬롯 drop 처리.
- * 오답도 슬롯에 들어갈 수 있게 허용하고, 즉시 불일치 피드백을 출력한다.
- * 퍼즐 UX상 "시도 -> 피드백"을 보장하기 위한 의도적 설계다.
- */
-function handleBlock0PurposeSlotDrop(dragEvent) {
+/** block0 일괄 복구 슬롯 drop 처리. */
+function handleBlock0ClauseSlotDrop(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var droppedTag = block0DraggedTag;
+  var slotKey = slot && slot.dataset ? String(slot.dataset.slotKey || "") : "";
   var prefix = getActivePuzzlePrefix();
-  var currentQuestion = getPuzzleCurrentQuestion(prefix);
-  var expectedAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
-  var droppedTag = "";
-  if (!state[prefix + "ClauseVisible"] || state[prefix + "Completed"] || block0AnswerRecoveryActive) {
+  if (!slot || !slotKey || block0AnswerRecoveryActive || state.block0Completed || !state.block0ClauseVisible) {
     return;
   }
   dragEvent.preventDefault();
-  droppedTag = block0DraggedTag;
   finalizeBlock0DragOperation();
-  if (!block0DraggedTag) {
-    if (!droppedTag) {
-      return;
-    }
+  if (!droppedTag) {
+    return;
   }
-
   if (prefix === "block0") {
-    setBlock0Purpose(droppedTag);
+    setBlock0BatchSlot(slotKey, droppedTag);
   } else {
     setPuzzlePurposeValue(state, prefix, droppedTag);
   }
   renderBlock0Panel();
   touchPuzzleActivity(prefix);
-  if (currentQuestion && expectedAnswer && state[prefix + "PurposeValue"] === expectedAnswer) {
+  if (prefix === "block0") {
+    tryExecuteBlock0Batch();
+  } else {
     handleBlock0ExecuteClick();
   }
+}
+
+/** block0 일괄 복구 슬롯 클릭 시 값을 비운다. */
+function handleBlock0ClauseSlotClick(clickEvent) {
+  var slot = clickEvent.target ? clickEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var slotKey = slot && slot.dataset ? String(slot.dataset.slotKey || "") : "";
+  var prefix = getActivePuzzlePrefix();
+  var answers = ensureBlock0ClauseAnswers();
+  if (!slot || !slotKey || block0AnswerRecoveryActive || state[prefix + "Completed"] || !state[prefix + "ClauseVisible"]) {
+    return;
+  }
+  if (prefix === "block0") {
+    if (!answers[slotKey]) {
+      return;
+    }
+    clearBlock0BatchSlot(slotKey);
+  } else {
+    if (!state[prefix + "PurposeValue"]) {
+      return;
+    }
+    setPuzzlePurposeValue(state, prefix, "");
+  }
+  renderBlock0Panel();
+  touchPuzzleActivity(prefix);
 }
 
 /** 블록 0 파일 열람 이벤트 처리. */
@@ -3725,67 +3920,6 @@ function onBlock1FileOpened(path) {
   }
 }
 
-function activatePendingRecoveryPrompt() {
-  var pendingFile = "";
-  if (state.phase !== FLOW_PHASE.STREAMING || block0AnswerRecoveryActive || !block0PendingRecoveryPrompt) {
-    return;
-  }
-
-  pendingFile = String(block0PendingRecoveryPrompt.fileName || "");
-  mountBlock0Clause();
-  block0DraggedRecoveryFile = "";
-  logSuccess("복구 식 연결: " + pendingFile);
-  renderBlock0Panel();
-  renderInvestigationPanel();
-  pulseBlock0Clause("is-goal-alert");
-  touchPuzzleActivity("block0");
-}
-
-function handleWorkbenchRecoveryDragEnter(dragEvent) {
-  if (!elements.block0ActionCard || state.block0ClauseVisible || !block0DraggedRecoveryFile) {
-    return;
-  }
-  dragEvent.preventDefault();
-  elements.block0ActionCard.classList.add("is-drop-active");
-}
-
-function handleWorkbenchRecoveryDragOver(dragEvent) {
-  if (!elements.block0ActionCard || state.block0ClauseVisible) {
-    return;
-  }
-  dragEvent.preventDefault();
-  if (dragEvent.dataTransfer) {
-    dragEvent.dataTransfer.dropEffect = block0DraggedRecoveryFile ? "move" : "none";
-  }
-  elements.block0ActionCard.classList.toggle("is-drop-active", Boolean(block0DraggedRecoveryFile));
-}
-
-function handleWorkbenchRecoveryDragLeave(dragEvent) {
-  if (!elements.block0ActionCard) {
-    return;
-  }
-  if (dragEvent.relatedTarget && elements.block0ActionCard.contains(dragEvent.relatedTarget)) {
-    return;
-  }
-  elements.block0ActionCard.classList.remove("is-drop-active");
-}
-
-function handleWorkbenchRecoveryDrop(dragEvent) {
-  dragEvent.preventDefault();
-  if (elements.block0ActionCard) {
-    elements.block0ActionCard.classList.remove("is-drop-active");
-  }
-  if (!block0DraggedRecoveryFile) {
-    logWarn("작업대에 마운트할 수 없는 파일입니다");
-    return;
-  }
-  if (!block0PendingRecoveryPrompt || String(block0PendingRecoveryPrompt.fileName || "") !== block0DraggedRecoveryFile) {
-    logWarn("복구 불가: 선행 조각 필요");
-    return;
-  }
-  activatePendingRecoveryPrompt();
-}
-
 /** PREVIEW BUFFER 내 태그 링크 클릭 시 즉시 인벤토리에 추가한다. */
 function handleInvestigationPreviewClick(clickEvent) {
   var profileTarget = clickEvent.target ? clickEvent.target.closest(".preview-profile-link") : null;
@@ -3824,49 +3958,28 @@ function handleInvestigationPreviewClick(clickEvent) {
   }
 }
 
-/** 목적 슬롯 클릭 시 보유 태그 중 적용 가능한 값으로 채운다. */
-function handleBlock0PurposeSlotClick() {
-  var prefix = getActivePuzzlePrefix();
-  if (!state[prefix + "ClauseVisible"] || block0AnswerRecoveryActive) {
-    return;
-  }
-  if (!state[prefix + "PurposeValue"]) {
-    return;
-  }
-
-  if (prefix === "block0") {
-    clearBlock0Purpose();
-  } else {
-    setPuzzlePurposeValue(state, prefix, "");
-  }
-  if (elements.block0PurposeSlot) {
-    elements.block0PurposeSlot.classList.remove("is-drop-hover");
-  }
-  renderBlock0Panel();
-  touchPuzzleActivity(prefix);
-}
-
 function handleBlock0ExecuteClick() {
   var prefix = getActivePuzzlePrefix();
   var spec = getPuzzleSpec(prefix);
   var questions = getPuzzleQuestions(prefix);
-  var currentQuestion = getPuzzleCurrentQuestion(prefix);
-  var expectedAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
   var lifecycle = spec.lifecycle || {};
+  var block0BatchStatus = prefix === "block0" ? getBlock0BatchStatus() : null;
+  var currentQuestion = prefix === "block1" ? getPuzzleCurrentQuestion(prefix) : null;
+  var expectedAnswer = currentQuestion ? String(currentQuestion.answer || "") : "";
 
   if (!state[prefix + "ClauseVisible"] || state[prefix + "Completed"] || block0AnswerRecoveryActive) {
     return;
   }
-  if (!currentQuestion || !state[prefix + "PurposeValue"]) {
-    return;
-  }
-  if (!expectedAnswer || state[prefix + "PurposeValue"] !== expectedAnswer) {
-    logWarn(lifecycle.mismatchLog || "patch rejected: binding mismatch");
-    pulseBlock0Clause("is-goal-alert");
-    return;
-  }
 
   if (prefix === "block1") {
+    if (!currentQuestion || !state[prefix + "PurposeValue"]) {
+      return;
+    }
+    if (!expectedAnswer || state[prefix + "PurposeValue"] !== expectedAnswer) {
+      logWarn(lifecycle.mismatchLog || "patch rejected: binding mismatch");
+      pulseBlock0Clause("is-goal-alert");
+      return;
+    }
     commitBlock1Answer(state, expectedAnswer);
     emitStateEvent(RUNTIME_TRANSITION_EVENT.BLOCK1_ANSWER_COMMITTED, null, {
       answer: expectedAnswer,
@@ -3889,24 +4002,18 @@ function handleBlock0ExecuteClick() {
     return;
   }
 
-  runBlock0AnswerRecoveryPipeline(currentQuestion, function onAnswerRecovered() {
-    commitBlock0Answer(expectedAnswer);
-    logSuccess("패치 반영: " + currentQuestion.id);
+  if (!block0BatchStatus || !block0BatchStatus.allFilled) {
+    return;
+  }
+  if (!block0BatchStatus.allCorrect) {
+    logWarn(lifecycle.mismatchLog || "patch rejected: binding mismatch");
+    pulseBlock0Clause("is-goal-alert");
+    return;
+  }
 
-    if (state.block0QuestionIndex < questions.length - 1) {
-      var nextTargetFile = "";
-      var nextSequenceFile = getBlock0UnlockSequenceFiles()[state.block0QuestionIndex + 1] || "";
-      nextTargetFile = String(nextSequenceFile || "");
-      advanceBlock0Question(Boolean(nextTargetFile));
-      pulseBlock0Clause("is-goal-clear");
-      renderBlock0Panel();
-      renderInvestigationPanel();
-      if (!nextTargetFile) {
-        pulseBlock0Clause("is-goal-alert");
-      }
-      touchPuzzleActivity("block0");
-      return;
-    }
+  runBlock0AnswerRecoveryPipeline(getBlock0IntegratedQuestion(), function onAnswerRecovered() {
+    commitBlock0Batch(block0BatchStatus.integratedAnswer);
+    logSuccess("패치 반영: block0.batch");
     completeBlock0ClauseIfReady();
   });
 }
@@ -3946,14 +4053,19 @@ function completeBlock1ClauseIfReady() {
 function completeBlock0ClauseIfReady() {
   var lifecycle = BLOCK0_SPEC.lifecycle || {};
   var postCompletionLogs = Array.isArray(lifecycle.postCompletionLogs) ? lifecycle.postCompletionLogs : [];
-  var questions = getBlock0ClauseQuestions();
+  var batchQuestions = getBlock0BatchQuestions();
+  var expectedAnswers = batchQuestions.map(function toAnswer(question) {
+    return String((question && question.answer) || "");
+  });
   if (state.block0Completed) {
     return;
   }
   if (
-    questions.length === 0 ||
-    state.block0SolvedAnswers.length < questions.length ||
-    state.block0QuestionIndex !== questions.length - 1
+    expectedAnswers.length === 0 ||
+    state.block0SolvedAnswers.length !== expectedAnswers.length ||
+    !expectedAnswers.every(function matchesExpected(answer, index) {
+      return state.block0SolvedAnswers[index] === answer;
+    })
   ) {
     return;
   }

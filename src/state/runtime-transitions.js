@@ -5,6 +5,7 @@ export const RUNTIME_TRANSITION_EVENT = Object.freeze({
   FLOW_LOGIN_REQUIRED: "flow.login_required",
   FLOW_ATTACHING: "flow.attaching",
   FLOW_STREAMING: "flow.streaming",
+  AUTH_CONSENT_UPDATED: "auth.consent_updated",
   AUTH_ERROR: "auth.error",
   AUTH_CONNECTING: "auth.connecting",
   AUTH_SUCCESS: "auth.success",
@@ -73,7 +74,13 @@ export function advanceOpeningFlow(runtimeState) {
 export function beginAuthFlow(runtimeState) {
   var state = ensureRuntimeState(runtimeState);
   transitionFlowPhase(state, FLOW_PHASE.LOGIN_REQUIRED);
+  state.authConsentAccepted = false;
   state.inputEnabled = false;
+}
+
+export function setAuthConsentAcceptedState(runtimeState, accepted) {
+  var state = ensureRuntimeState(runtimeState);
+  state.authConsentAccepted = Boolean(accepted);
 }
 
 export function enterAttachingFlow(runtimeState) {

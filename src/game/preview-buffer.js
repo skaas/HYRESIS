@@ -1,5 +1,51 @@
 /** PREVIEW BUFFER 렌더러: 후보 태그를 링크 버튼으로 치환해 출력한다. */
 
+function getFileNameFromPath(path) {
+  var text = String(path || "");
+  var lastSlash = text.lastIndexOf("/");
+  return lastSlash >= 0 ? text.slice(lastSlash + 1) : text;
+}
+
+function formatPreviewLineNumber(index) {
+  var safeIndex = Math.max(1, Number(index) || 1);
+  return String(safeIndex).padStart(2, "0");
+}
+
+function extractLeadingPreviewMeta(lines) {
+  var safeLines = Array.isArray(lines) ? lines : [];
+  var cursor = 0;
+  var meta = {
+    fragment: "",
+    sourceTrace: "",
+    projectionClass: "",
+  };
+
+  while (cursor < safeLines.length) {
+    var text = String(safeLines[cursor] || "").trim();
+    if (text.indexOf("fragment ") === 0 && !meta.fragment) {
+      meta.fragment = text;
+      cursor += 1;
+      continue;
+    }
+    if (text.indexOf("source trace:") === 0 && !meta.sourceTrace) {
+      meta.sourceTrace = text.slice("source trace:".length).trim();
+      cursor += 1;
+      continue;
+    }
+    if (text.indexOf("projection class:") === 0 && !meta.projectionClass) {
+      meta.projectionClass = text.slice("projection class:".length).trim();
+      cursor += 1;
+      continue;
+    }
+    break;
+  }
+
+  return {
+    meta: meta,
+    bodyLines: safeLines.slice(cursor),
+  };
+}
+
 function getPreviewLineKind(line, inProjectionNote) {
   var text = String(line || "").trim();
 
@@ -70,7 +116,7 @@ function renderPreviewDialogueLine(container, line, candidates, sourcePath, coll
 
   dividerNode = document.createElement("span");
   dividerNode.className = "preview-dialogue-divider";
-  dividerNode.textContent = "|";
+  dividerNode.textContent = "";
 
   bodyNode = document.createElement("span");
   bodyNode.className = "preview-dialogue-body";
@@ -133,7 +179,8 @@ export function renderPreviewBufferWithTagLinks(options) {
   var lines = options && options.lines;
   var fileSpecByPath = (options && options.fileSpecByPath) || {};
   var collectedTags = (options && options.collectedTags) || [];
-  var safeLines = Array.isArray(lines) ? lines : [];
+  var extractedPreview = extractLeadingPreviewMeta(lines);
+  var safeLines = extractedPreview.bodyLines;
   var fileSpec = fileSpecByPath[path] || null;
   var candidates = fileSpec && Array.isArray(fileSpec.candidates) ? fileSpec.candidates.slice() : [];
   var lineIndex = 0;
@@ -147,6 +194,18 @@ export function renderPreviewBufferWithTagLinks(options) {
   var lineKind = "";
   var speakerProfiles = (options && options.speakerProfiles) || {};
   var selectedProfileId = (options && options.selectedProfileId) || "";
+  var shell = null;
+  var toolbar = null;
+  var titleNode = null;
+  var metaNode = null;
+  var body = null;
+  var metaSummaryNode = null;
+  var lineNumberNode = null;
+  var contentNode = null;
+  var safePath = String(path || "");
+  var fileName = getFileNameFromPath(safePath);
+  var previewMeta = extractedPreview.meta;
+  var headerParts = [];
 
   if (!container) {
     return;
@@ -154,10 +213,57 @@ export function renderPreviewBufferWithTagLinks(options) {
 
   container.innerHTML = "";
   container.classList.add("is-structured-preview");
+  shell = document.createElement("section");
+  shell.className = "preview-file-shell";
+
+  toolbar = document.createElement("header");
+  toolbar.className = "preview-file-toolbar";
+
+  titleNode = document.createElement("div");
+  titleNode.className = "preview-file-title";
+  titleNode.textContent = fileName || "preview.log";
+
+  if (previewMeta.fragment) {
+    headerParts.push(previewMeta.fragment);
+  }
+  if (previewMeta.sourceTrace) {
+    headerParts.push("source " + previewMeta.sourceTrace);
+  }
+  if (previewMeta.projectionClass) {
+    headerParts.push("class " + previewMeta.projectionClass);
+  }
+
+  metaSummaryNode = document.createElement("div");
+  metaSummaryNode.className = "preview-file-summary";
+  metaSummaryNode.textContent = headerParts.join("  |  ");
+
+  metaNode = document.createElement("div");
+  metaNode.className = "preview-file-meta";
+  metaNode.textContent = "restored read-only  |  lines " + String(safeLines.length);
+
+  toolbar.appendChild(titleNode);
+  if (headerParts.length > 0) {
+    toolbar.appendChild(metaSummaryNode);
+  }
+  toolbar.appendChild(metaNode);
+  shell.appendChild(toolbar);
+
+  body = document.createElement("div");
+  body.className = "preview-file-body";
+  shell.appendChild(body);
+
   while (lineIndex < safeLines.length) {
     var row = document.createElement("div");
     lineKind = getPreviewLineKind(safeLines[lineIndex], inProjectionNote);
     row.className = "preview-line preview-line-" + lineKind;
+    row.dataset.lineNumber = String(lineIndex + 1);
+    lineNumberNode = document.createElement("span");
+    lineNumberNode.className = "preview-line-number";
+    lineNumberNode.textContent = formatPreviewLineNumber(lineIndex + 1);
+    contentNode = document.createElement("div");
+    contentNode.className = "preview-line-content";
+    row.appendChild(lineNumberNode);
+    row.appendChild(contentNode);
     if (lineKind === "note-head") {
       inProjectionNote = true;
     } else if (lineKind === "hashline") {
@@ -165,7 +271,7 @@ export function renderPreviewBufferWithTagLinks(options) {
     }
     if (lineKind === "dialogue") {
       matchedInLine = renderPreviewDialogueLine(
-        row,
+        contentNode,
         safeLines[lineIndex],
         candidates,
         path,
@@ -174,12 +280,12 @@ export function renderPreviewBufferWithTagLinks(options) {
         selectedProfileId,
       );
     } else {
-      matchedInLine = renderPreviewLineWithLinks(row, safeLines[lineIndex], candidates, path, collectedTags);
+      matchedInLine = renderPreviewLineWithLinks(contentNode, safeLines[lineIndex], candidates, path, collectedTags);
     }
     Object.keys(matchedInLine).forEach(function markMatched(tag) {
       matchedTags[tag] = true;
     });
-    container.appendChild(row);
+    body.appendChild(row);
     lineIndex += 1;
   }
 
@@ -212,6 +318,8 @@ export function renderPreviewBufferWithTagLinks(options) {
         fallbackRow.appendChild(document.createTextNode(" "));
       }
     });
-    container.appendChild(fallbackRow);
+    shell.appendChild(fallbackRow);
   }
+
+  container.appendChild(shell);
 }
