@@ -1904,7 +1904,7 @@ function startOpeningSequence() {
   setTerminalConnected(false);
   setInvestigationPanelVisible(true);
   setTerminalPathbar(state.investigationCwd);
-  renderInvestigationPanel("채널 분리됨. 열람 동의 후 원격 아카이브에 접속할 수 있습니다.");
+  renderInvestigationPanel("채널 분리됨. 복원 임무 수락 후 원격 아카이브에 접속할 수 있습니다.");
   setSystemOverlayVisible(true);
   setSystemStatus("INITIALIZING");
   setInputEnabled(false);
@@ -1944,7 +1944,7 @@ function beginFtpAuthFlow() {
   setTerminalConnected(false);
   setAuthOverlayVisible(true);
   setAuthCardMode("");
-  setAuthStatus("열람 동의 대기");
+  setAuthStatus("의뢰 대기");
   setAuthFormEnabled(true);
 
   if (elements.authError) {
@@ -1976,9 +1976,9 @@ function handleAuthConsentButtonClick() {
 
   if (accepted) {
     setAuthCardMode("");
-    setAuthStatus("동의 확인됨");
+    setAuthStatus("의뢰 수락 확인됨");
   } else {
-    setAuthStatus("열람 동의 대기");
+    setAuthStatus("의뢰 대기");
   }
 
   emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_CONSENT_UPDATED, null, {
@@ -1999,22 +1999,22 @@ function handleAuthFormSubmit(submitEvent) {
 
   if (!state.authConsentAccepted) {
     setAuthCardMode("is-error");
-    setAuthStatus("동의 필요");
+    setAuthStatus("의뢰 수락 필요");
     emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_ERROR, null, {
       reason: "missing-consent-ack",
     });
     if (elements.authError) {
-      elements.authError.textContent = "열람 동의 버튼을 눌러주세요.";
+      elements.authError.textContent = "의뢰 수락 버튼을 눌러주세요.";
     }
     scheduleRuntimeTimeout(function resetAuthPrompt() {
       setAuthCardMode("");
-      setAuthStatus("열람 동의 대기");
+      setAuthStatus("의뢰 대기");
     }, 260, "auth-reset-prompt");
     return;
   }
 
   setAuthCardMode("is-connecting");
-  setAuthStatus("동의 확인 중");
+  setAuthStatus("의뢰 수락 확인 중");
   setAuthFormEnabled(false);
   emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_CONNECTING);
 
@@ -2023,12 +2023,12 @@ function handleAuthFormSubmit(submitEvent) {
     emitStateEvent(RUNTIME_TRANSITION_EVENT.FLOW_ATTACHING);
     emitStateEvent(RUNTIME_TRANSITION_EVENT.AUTH_SUCCESS);
     setAuthCardMode("is-success");
-    setAuthStatus("세션 연결됨");
-    logSuccess("열람 동의 확인");
+    setAuthStatus("복구 세션 연결됨");
+    logSuccess("의뢰 수락 확인");
 
     scheduleRuntimeTimeout(function attachStage() {
       setAuthStatus("터미널 연결 중");
-      logSystem("열람 세션 연결 중...");
+      logSystem("복구 세션 연결 중...");
     }, 180, "auth-attach-stage");
 
     scheduleRuntimeTimeout(function enterFtpSession() {
@@ -2088,8 +2088,8 @@ function renderAuthConsentState() {
   var accepted = Boolean(state.authConsentAccepted);
   elements.authConsentButton.setAttribute("aria-pressed", accepted ? "true" : "false");
   elements.authConsentButton.textContent = accepted
-    ? "주의 사항 확인 완료. 다시 누르면 동의를 해제합니다."
-    : "주의 사항을 확인했고 동의합니다.";
+    ? "의뢰 수락 완료. 다시 누르면 수락을 해제합니다."
+    : "이 의뢰를 수락합니다.";
 
   if (elements.authForm) {
     var submit = elements.authForm.querySelector(".auth-submit");

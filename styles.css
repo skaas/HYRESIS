@@ -1582,14 +1582,14 @@ button.preview-dialogue-speaker.is-active {
 }
 
 .auth-card {
-  width: min(440px, calc(100vw - 44px));
+  width: min(700px, calc(100vw - 44px));
   border: 1px solid #2f705d;
   background: #07120f;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
-  padding: 18px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   animation: auth-card-in 240ms ease-out;
 }
 
@@ -1656,6 +1656,12 @@ button.preview-dialogue-speaker.is-active {
   padding: 12px 14px;
 }
 
+.auth-mission {
+  border-color: #396457;
+  background:
+    linear-gradient(180deg, rgba(9, 23, 19, 0.96) 0%, rgba(6, 16, 13, 0.94) 100%);
+}
+
 .auth-warning-kicker {
   color: #d3e7de;
   font-size: 11px;
@@ -1667,6 +1673,40 @@ button.preview-dialogue-speaker.is-active {
   color: #c5ddd3;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.auth-document {
+  border: 1px solid #254a40;
+  background: #05100d;
+  box-shadow: inset 0 0 0 1px rgba(72, 114, 101, 0.16);
+}
+
+.auth-document-title {
+  padding: 10px 14px;
+  border-bottom: 1px solid #1f3d35;
+  color: #b6d6cb;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-document-body {
+  margin: 0;
+  padding: 14px;
+  max-height: 34vh;
+  overflow-y: auto;
+  color: #bbd6cc;
+  font-size: 12px;
+  line-height: 1.64;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  background:
+    linear-gradient(180deg, rgba(5, 16, 13, 0.96) 0%, rgba(4, 12, 10, 0.98) 100%);
+}
+
+.auth-brief {
+  border-top: 1px solid #183129;
+  padding-top: 10px;
 }
 
 .auth-notes {
@@ -1792,6 +1832,26 @@ button.preview-dialogue-speaker.is-active {
 .auth-submit:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+@media (max-width: 680px) {
+  .auth-card {
+    width: min(100vw - 22px, 640px);
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .auth-document-body {
+    max-height: 30vh;
+    font-size: 11px;
+    line-height: 1.56;
+  }
+
+  .auth-field-copy,
+  .auth-consent-button,
+  .auth-submit {
+    font-size: 13px;
+  }
 }
 
 .auth-card.is-error {
