@@ -79,6 +79,16 @@ function formatCompositeTag(operatorTag, args) {
   return String(operatorTag || "") + "(" + safeArgs.join(", ") + ")";
 }
 
+/** 단일 인자 개념 태그의 내부 인자를 반환한다. 예: 금지(해침(인간)) -> 해침(인간) */
+function unwrapSingleConceptArg(tag) {
+  var text = String(tag || "");
+  var openIdx = text.indexOf("(");
+  if (openIdx <= 0 || text.lastIndexOf(")") !== text.length - 1) {
+    return "";
+  }
+  return text.slice(openIdx + 1, -1);
+}
+
 /** 첫 재료(연산자) 기반으로 필요한 인자 개수를 계산한다. */
 export function getRequiredArgCountForOperator(opTag, signatures) {
   if (isConceptTag(opTag)) {
@@ -147,6 +157,12 @@ export function runTypeDrivenSynthesis(selected, signatures, categoryMap) {
     return null;
   }
   if (args.every(function checkArg(arg, idx) { return matchesExpectedType(arg, typeList[idx], categoryMap); })) {
+    if (getTagHead(opTag) === "금지" && args.length === 1 && getTagHead(args[0]) === "금지") {
+      return {
+        resultTag: unwrapSingleConceptArg(args[0]),
+        recipeText: "[NORMALIZE] 금지(금지(x)) -> x",
+      };
+    }
     return {
       resultTag: formatCompositeTag(opTag, args),
       recipeText: "[TYPE] " + getTagHead(opTag) + " : [" + typeList.join(", ") + "]",
