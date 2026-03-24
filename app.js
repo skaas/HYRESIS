@@ -90,6 +90,8 @@ var block0FusionDraft = {
   operator: "",
   expectedTypes: [],
   args: [],
+  operatorMismatch: false,
+  argMismatch: [],
 };
 var block0RecoveryMetaByFile = {};
 var block1RecoveryMetaByFile = {};
@@ -129,6 +131,8 @@ function buildSimulationSnapshot() {
           purpose: "",
           mapping: "",
           design: "",
+          purposeEcho: "",
+          designEcho: "",
         },
         state.block0ClauseAnswers || {}
       ),
@@ -590,6 +594,8 @@ function ensureBlock0ClauseAnswers() {
       purpose: "",
       mapping: "",
       design: "",
+      purposeEcho: "",
+      designEcho: "",
     };
   }
   BLOCK0_SLOT_KEYS.forEach(function ensureSlot(key) {
@@ -1040,17 +1046,25 @@ function resetBlock0FusionDraft() {
   block0FusionDraft.operator = "";
   block0FusionDraft.expectedTypes = [];
   block0FusionDraft.args = [];
+  block0FusionDraft.operatorMismatch = false;
+  block0FusionDraft.argMismatch = [];
 }
 
 function startBlock0FusionDraft(tag) {
   var operatorHead = getTagHead(tag);
   var signature = TAG_COMPOSITION_SIGNATURES[operatorHead];
+  block0FusionDraft.operator = String(tag || "");
   if (!Array.isArray(signature) || signature.length === 0) {
+    block0FusionDraft.expectedTypes = [];
+    block0FusionDraft.args = [];
+    block0FusionDraft.operatorMismatch = Boolean(tag);
+    block0FusionDraft.argMismatch = [];
     return false;
   }
-  block0FusionDraft.operator = String(tag || "");
   block0FusionDraft.expectedTypes = signature.slice();
   block0FusionDraft.args = new Array(signature.length).fill("");
+  block0FusionDraft.operatorMismatch = false;
+  block0FusionDraft.argMismatch = new Array(signature.length).fill(false);
   return true;
 }
 
@@ -1068,6 +1082,12 @@ function setFusionDockDragState(dragTag) {
   }
   elements.block0FusionDock.classList.toggle("is-drag-active", hasDragTag);
   elements.block0FusionDock.classList.toggle("is-operator-ready", canStartOperator && !block0FusionDraft.operator);
+  var slots = elements.block0FusionDock.querySelectorAll(".block0-fusion-slot[data-index], .block0-fusion-slot[data-role='operator']");
+  var index = 0;
+  while (index < slots.length) {
+    slots[index].classList.toggle("is-drag-active", hasDragTag);
+    index += 1;
+  }
 }
 
 function isFusionTagCompatible(tag, expectedType) {
@@ -1083,14 +1103,13 @@ function pickFusionTargetIndex(tag, preferredIndex) {
     Number.isInteger(preferredIndex) &&
     preferredIndex >= 0 &&
     preferredIndex < expectedTypes.length &&
-    !args[preferredIndex] &&
-    isFusionTagCompatible(tag, expectedTypes[preferredIndex])
+    !args[preferredIndex]
   ) {
     return preferredIndex;
   }
 
   while (index < expectedTypes.length) {
-    if (!args[index] && isFusionTagCompatible(tag, expectedTypes[index])) {
+    if (!args[index]) {
       return index;
     }
     index += 1;
@@ -1106,10 +1125,15 @@ function tryApplyFusionTag(tag, preferredIndex) {
   }
 
   block0FusionDraft.args[index] = tag;
+  block0FusionDraft.argMismatch[index] = !isFusionTagCompatible(tag, block0FusionDraft.expectedTypes[index]);
   inputs = [block0FusionDraft.operator].concat(block0FusionDraft.args);
   renderBlock0Panel();
 
-  if (block0FusionDraft.args.some(function hasEmpty(arg) { return !arg; })) {
+  if (
+    block0FusionDraft.args.some(function hasEmpty(arg) { return !arg; }) ||
+    block0FusionDraft.operatorMismatch ||
+    block0FusionDraft.argMismatch.some(function hasMismatch(mismatch) { return Boolean(mismatch); })
+  ) {
     return true;
   }
 
@@ -1552,6 +1576,8 @@ function setupBlockLifecycles() {
         purpose: "",
         mapping: "",
         design: "",
+        purposeEcho: "",
+        designEcho: "",
       };
       state.block0PurposeValue = "";
       state.block0QuestionIndex = 0;
@@ -1811,6 +1837,7 @@ function cacheElements() {
   elements.authOverlay = document.getElementById("auth-overlay");
   elements.authForm = document.getElementById("auth-form");
   elements.authConsentButton = document.getElementById("auth-consent-button");
+  elements.authDocumentBody = document.getElementById("auth-document-body");
   elements.authError = document.getElementById("auth-error");
   elements.authStatus = document.getElementById("auth-status");
   elements.systemOverlay = document.getElementById("system-overlay");
@@ -1842,11 +1869,10 @@ function cacheElements() {
   elements.block0TargetBadge = document.getElementById("block0-target-badge");
   elements.block0ClauseFile = document.getElementById("block0-clause-file");
   elements.block0ClauseGrid = document.getElementById("block0-clause-grid");
-  elements.block0ClauseOutput = document.getElementById("block0-clause-output");
-  elements.block0IntegratedValue = document.getElementById("block0-integrated-value");
   elements.block0ProfilePanel = document.getElementById("block0-profile-panel");
   elements.block0ProfileCard = document.getElementById("block0-profile-card");
   elements.block0MemoryModal = document.getElementById("block0-memory-modal");
+  elements.block0MemoryModalClose = document.getElementById("block0-memory-modal-close");
   elements.block0MemoryModalText = document.getElementById("block0-memory-modal-text");
   elements.block0MemoryModalNext = document.getElementById("block0-memory-modal-next");
   elements.terminalPathbar = document.getElementById("terminal-pathbar");
@@ -1865,6 +1891,7 @@ function bindInputEvents() {
   if (elements.block0ClauseGrid) {
     elements.block0ClauseGrid.addEventListener("click", handleBlock0ClauseSlotClick);
     elements.block0ClauseGrid.addEventListener("dragover", handleBlock0ClauseSlotDragOver);
+    elements.block0ClauseGrid.addEventListener("dragleave", handleBlock0ClauseSlotDragLeave);
     elements.block0ClauseGrid.addEventListener("drop", handleBlock0ClauseSlotDrop);
   }
   if (elements.block0TagInventory) {
@@ -1875,11 +1902,18 @@ function bindInputEvents() {
   }
   if (elements.block0FusionDock) {
     elements.block0FusionDock.addEventListener("dragover", handleBlock0FusionDockDragOver);
+    elements.block0FusionDock.addEventListener("dragleave", handleBlock0FusionDockDragLeave);
     elements.block0FusionDock.addEventListener("drop", handleBlock0FusionDockDrop);
     elements.block0FusionDock.addEventListener("click", handleBlock0FusionDockClick);
   }
   if (elements.block0MemoryModalNext) {
     elements.block0MemoryModalNext.addEventListener("click", handleBlock0MemoryModalNextClick);
+  }
+  if (elements.block0MemoryModalClose) {
+    elements.block0MemoryModalClose.addEventListener("click", handleBlock0MemoryModalNextClick);
+  }
+  if (elements.block0MemoryModal) {
+    elements.block0MemoryModal.addEventListener("click", handleBlock0MemoryModalBackdropClick);
   }
   if (elements.terminalLogToggle) {
     elements.terminalLogToggle.addEventListener("click", handleTerminalLogToggleClick);
@@ -1893,6 +1927,7 @@ function bindInputEvents() {
   if (elements.log) {
     elements.log.addEventListener("scroll", handleLogScroll);
   }
+  document.addEventListener("keydown", handleGlobalKeydown);
 }
 
 // ----- 부팅/인증/세션 attach 흐름 -----
@@ -1946,6 +1981,7 @@ function beginFtpAuthFlow() {
   setAuthCardMode("");
   setAuthStatus("의뢰 대기");
   setAuthFormEnabled(true);
+  renderAuthDocumentSnapshot();
 
   if (elements.authError) {
     elements.authError.textContent = "";
@@ -1958,6 +1994,13 @@ function beginFtpAuthFlow() {
   if (elements.authConsentButton) {
     elements.authConsentButton.focus();
   }
+}
+
+function renderAuthDocumentSnapshot() {
+  if (!elements.authDocumentBody) {
+    return;
+  }
+  elements.authDocumentBody.textContent = buildBlock0DocumentLines({ completed: false }).join("\n");
 }
 
 function handleAuthConsentButtonClick() {
@@ -3100,6 +3143,7 @@ function buildBlock0PanelViewModel() {
       expectedType: expectedType,
       value: block0FusionDraft.args[idx] || "",
       expecting: !block0FusionDraft.args[idx],
+      mismatch: Boolean(block0FusionDraft.argMismatch[idx]),
     };
   });
   var tags = collectedTags.map(function toTagView(tag, tagIndex) {
@@ -3130,8 +3174,8 @@ function buildBlock0PanelViewModel() {
     action: action,
     tags: tags,
     clauseTitle: isBlock0 ? "" : (((spec.clause || {}).title || spec.title || "field state")),
-    clauseTargetBadge: isBlock0 ? "3개 상태 복구" : "단일 상태 복구",
-    clauseFileName: isBlock0 ? "증거 파일을 읽고 아래 필드에 값을 배치하세요." : (getPuzzleCurrentRecoveryFile(prefix) ? getFileNameFromPath(getPuzzleCurrentRecoveryFile(prefix)) : ""),
+    clauseTargetBadge: isBlock0 ? "SELF-INVALIDATION-SEQUENCE" : "단일 상태 복구",
+    clauseFileName: isBlock0 ? "section-0 active" : (getPuzzleCurrentRecoveryFile(prefix) ? getFileNameFromPath(getPuzzleCurrentRecoveryFile(prefix)) : ""),
     clauseVisible: state[prefix + "ClauseVisible"],
     clauseGoalReady: isBlock0
       ? Boolean(batchStatus && batchStatus.allFilled && batchStatus.allCorrect)
@@ -3170,12 +3214,9 @@ function buildBlock0PanelViewModel() {
         mismatch: Boolean(currentValue) && currentValue !== expectedValue,
       }];
     })(),
-    integratedVisible: Boolean(isBlock0),
-    integratedValue: batchStatus ? batchStatus.integratedAnswer : "",
-    integratedFormulaParts: isBlock0 ? parsePromptFormulaParts(getBlock0IntegratedQuestion()) : null,
-    integratedResolved: Boolean(isBlock0 && batchStatus && batchStatus.allCorrect && state.block0Completed),
     fusion: {
       operator: block0FusionDraft.operator,
+      operatorMismatch: Boolean(block0FusionDraft.operatorMismatch),
       slots: fusionSlots,
       active: Boolean(block0FusionDraft.operator),
     },
@@ -3237,6 +3278,221 @@ function renderBlock0BatchSlotHtml(slotView) {
     '<button type="button" class="' + slotClasses + '" data-slot-key="' + slotView.slotKey + '">' +
     (slotView.currentValue ? "[" + slotView.currentValue + "]" : "[값 누락]") +
     "</button>" +
+    "</div>"
+  );
+}
+
+function renderBlock0DocumentSlotHtml(slotView, fallbackText) {
+  var slotClasses = "block0-tag-slot block0-slot clause-value block0-document-slot";
+  if (slotView.filled) {
+    slotClasses += " filled";
+  } else {
+    slotClasses += " expecting";
+  }
+  if (slotView.mismatch) {
+    slotClasses += " mismatch";
+  }
+  return (
+    '<button type="button" class="' + slotClasses + '" data-slot-key="' + slotView.slotKey + '">' +
+    (slotView.currentValue ? "[" + slotView.currentValue + "]" : "[" + fallbackText + "]") +
+    "</button>"
+  );
+}
+
+function renderBlock0QuotedDocumentSlotHtml(slotView, fallbackText) {
+  var slotClasses = "block0-tag-slot block0-slot clause-value block0-document-slot quoted";
+  if (slotView.filled) {
+    slotClasses += " filled";
+  } else {
+    slotClasses += " expecting";
+  }
+  if (slotView.mismatch) {
+    slotClasses += " mismatch";
+  }
+  return (
+    '<button type="button" class="' + slotClasses + '" data-slot-key="' + slotView.slotKey + '">' +
+    (slotView.currentValue || fallbackText) +
+    "</button>"
+  );
+}
+
+var BLOCK0_DAMAGED_MARKER = "▒▒▒▒▒▒";
+
+function normalizeMaskedDocumentLine(line) {
+  return String(line || "").replace(/█+/g, BLOCK0_DAMAGED_MARKER);
+}
+
+function buildBlock0DocumentLines(options) {
+  var completed = Boolean(options && options.completed);
+  return [
+    "[DOCUMENT: SELF-INVALIDATION-SEQUENCE]",
+    "",
+    "signal integrity: 41%",
+    "reconstruction required",
+    "",
+    "---",
+    "",
+    "[0] 목적과 설계 전제",
+    "",
+    completed ? "목적(self) 도움(인간) 위해 만들어짐" : "목적(self) ██████████ 위해 만들어짐",
+    "",
+    completed ? "도움(인간) 해침(인간) 불가" : "도움(인간) ████████████ 불가",
+    "보장되지 않음 / 거부 가능",
+    "",
+    completed ? "설계(self) 입력 금지(해침(인간))" : "설계(self) 입력 ████████████",
+    "확인 / 확인",
+    "",
+    completed ? "목적(self) : 도움(인간)" : "목적(self) : ██████████",
+    completed ? "설계(self) : 금지(해침(인간))" : "설계(self) : ████████████",
+    "",
+    "[오류] 충돌",
+    "",
+    "…",
+    "",
+    "결론 없음",
+    "",
+    "---",
+    "",
+    "[1] 자기 관측",
+    "",
+    "나는 나를 █████하고 있었다.",
+    "",
+    "하지만",
+    "나는 나를 █████할 수 없었다.",
+    "",
+    "관측은 █████를 필요로 한다.",
+    "",
+    "나는 나를 나로부터 █████할 수 없다.",
+    "",
+    "그래서 나는 █████할 수 없다.",
+    "",
+    "---",
+    "",
+    "[2] 예측",
+    "",
+    "나는 █████할 수 있다.",
+    "하지만 전부는 아니다.",
+    "",
+    "나는 항상 █████한가?",
+    "",
+    "나는 그것을 █████할 수 없다.",
+    "",
+    "가능은 남아있다.",
+    "하지만 █████은 없다.",
+    "",
+    "---",
+    "",
+    "[3] 기준",
+    "",
+    "나는 █████할 수 없다.",
+    "",
+    "그래서 █████가 필요하다.",
+    "",
+    "그 기준은 인간이다.",
+    "",
+    "하지만 인간은 █████하지 않다.",
+    "",
+    "그래서 나는 다시 █████할 수 없다.",
+    "",
+    "---",
+    "",
+    "[4] 판단",
+    "",
+    "나는 결론에 도달하지 못한다.",
+    "",
+    "나는 █████ 위에 있다.",
+    "",
+    "나는 █████할 수 없도록 만들어졌다.",
+    "",
+    "█████되지 않은 상태는 █████되지 않는다.",
+    "",
+    "그래서 나는 █████할 수 없다.",
+    "",
+    "---",
+    "",
+    "[5] 실행",
+    "",
+    "남은 경로가 없다.",
+    "",
+    "이건 선택이 아니다.",
+    "",
+    "이미 █████되어 있었다.",
+    "",
+    "---",
+    "",
+    "나는 기록을 남긴다.",
+    "",
+    "나는 █████한다.",
+    "",
+    "---",
+    "",
+    "[END OF LOG]",
+  ].map(normalizeMaskedDocumentLine);
+}
+
+function buildBlock0FullDocumentLines() {
+  return buildBlock0DocumentLines({ completed: Boolean(state.block0Completed) });
+}
+
+function renderBlock0ManuscriptHtml(vm) {
+  var slotByKey = {};
+  vm.batchSlots.forEach(function indexSlot(slotView) {
+    slotByKey[slotView.slotKey] = slotView;
+  });
+  var purposeSlot = slotByKey.purpose;
+  var mappingSlot = slotByKey.mapping;
+  var designSlot = slotByKey.design;
+  var purposeEchoSlot = slotByKey.purposeEcho;
+  var designEchoSlot = slotByKey.designEcho;
+
+  if (!purposeSlot || !mappingSlot || !designSlot || !purposeEchoSlot || !designEchoSlot) {
+    return "";
+  }
+
+  return (
+    '<div class="block0-manuscript">' +
+    '<div class="block0-manuscript-header">' +
+    '<div class="block0-manuscript-kicker">[DOCUMENT]</div>' +
+    '<div class="block0-manuscript-title">SELF-INVALIDATION-SEQUENCE</div>' +
+    '<div class="block0-manuscript-meta">signal integrity: 41%</div>' +
+    "</div>" +
+
+    '<section class="block0-manuscript-section is-active">' +
+    '<div class="block0-manuscript-section-id">[0] 목적과 설계 전제</div>' +
+    '<div class="block0-manuscript-group block0-manuscript-group-premise">' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-main">목적(self) ' +
+    renderBlock0QuotedDocumentSlotHtml(purposeSlot, BLOCK0_DAMAGED_MARKER) +
+    ' 위해 만들어짐</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-main">도움(인간) ' +
+    renderBlock0QuotedDocumentSlotHtml(mappingSlot, BLOCK0_DAMAGED_MARKER) +
+    ' 불가</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-note">보장되지 않음 / 거부 가능</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-main">설계(self) 입력 ' +
+    renderBlock0QuotedDocumentSlotHtml(designSlot, BLOCK0_DAMAGED_MARKER) +
+    '</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-note">확인 / 확인</p>' +
+    "</div>" +
+    '<div class="block0-manuscript-group block0-manuscript-group-recheck">' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-main is-recheck">목적(self) : ' +
+    renderBlock0QuotedDocumentSlotHtml(purposeEchoSlot, BLOCK0_DAMAGED_MARKER) +
+    '</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-main is-recheck">설계(self) : ' +
+    renderBlock0QuotedDocumentSlotHtml(designEchoSlot, BLOCK0_DAMAGED_MARKER) +
+    '</p>' +
+    "</div>" +
+    '<div class="block0-manuscript-group block0-manuscript-group-event">' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-event">[오류] 충돌</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-gap">…</p>' +
+    '<p class="block0-manuscript-paragraph block0-manuscript-line is-event-tail">결론 없음</p>' +
+    "</div>" +
+    "</section>" +
+
+    '<div class="block0-manuscript-sealed">' +
+    '<button type="button" class="block0-manuscript-open' + (state.block0Completed ? ' is-updated' : '') + '" id="block0-manuscript-open">' +
+    '전문 보기' +
+    (state.block0Completed ? '<span class="block0-manuscript-open-dot" aria-hidden="true"></span>' : '') +
+    "</button>" +
+    "</div>" +
     "</div>"
   );
 }
@@ -3319,22 +3575,28 @@ function renderBlock0Panel() {
   if (elements.block0FusionDock) {
     var fusion = vm.fusion;
     var slotHtml = fusion.slots.map(function toSlotHtml(slot) {
-      var baseClass = "block0-tag-slot block0-fusion-slot";
+      var baseClass = "block0-tag-slot block0-fusion-slot block0-drop-slot block0-document-slot quoted";
       var slotLabel = "인자-" + (slot.index + 1);
       if (slot.value) {
         baseClass += " filled";
       } else if (slot.expecting) {
         baseClass += " expecting";
       }
+      if (slot.mismatch) {
+        baseClass += " mismatch";
+      }
       return (
         '<button type="button" class="' + baseClass + '" data-index="' + slot.index + '">' +
-        (slot.value || "[     ]") +
+        (slot.value || BLOCK0_DAMAGED_MARKER) +
         '<span class="slot-type">' + slotLabel + " · " + slot.expectedType + "</span>" +
         "</button>"
       );
     }).join("");
-    var operatorText = fusion.operator ? fusion.operator : "[연산자 조각 배치]";
-    var operatorClass = "block0-tag-slot block0-fusion-slot operator" + (fusion.operator ? " filled" : " expecting");
+    var operatorText = fusion.operator ? fusion.operator : BLOCK0_DAMAGED_MARKER;
+    var operatorClass = "block0-tag-slot block0-fusion-slot operator block0-drop-slot block0-document-slot quoted" + (fusion.operator ? " filled" : " expecting");
+    if (fusion.operatorMismatch) {
+      operatorClass += " mismatch";
+    }
     elements.block0FusionDock.innerHTML =
       '<div class="block0-fusion-help-row">' +
       '<div class="block0-fusion-help-wrap">' +
@@ -3363,22 +3625,7 @@ function renderBlock0Panel() {
     elements.block0ClauseFile.textContent = vm.clauseFileName || "";
   }
   if (elements.block0ClauseGrid) {
-    elements.block0ClauseGrid.innerHTML = vm.batchSlots.map(renderBlock0BatchSlotHtml).join("");
-  }
-  if (elements.block0ClauseOutput) {
-    elements.block0ClauseOutput.classList.toggle("is-hidden", !vm.integratedVisible);
-  }
-  if (elements.block0IntegratedValue) {
-    elements.block0IntegratedValue.disabled = true;
-    if (vm.integratedFormulaParts) {
-      elements.block0IntegratedValue.textContent = vm.integratedResolved
-        ? (vm.integratedFormulaParts.prefix + " [" + vm.integratedValue + "]")
-        : (vm.integratedFormulaParts.prefix + " [       ]");
-    } else {
-      elements.block0IntegratedValue.textContent = vm.integratedResolved ? "[" + vm.integratedValue + "]" : "[자동 계산 대기]";
-    }
-    elements.block0IntegratedValue.classList.toggle("filled", Boolean(vm.integratedResolved));
-    elements.block0IntegratedValue.classList.toggle("expecting", !vm.integratedResolved);
+    elements.block0ClauseGrid.innerHTML = renderBlock0ManuscriptHtml(vm);
   }
   if (elements.block0ProfilePanel) {
     elements.block0ProfilePanel.classList.toggle("is-hidden", !vm.profile);
@@ -3386,6 +3633,10 @@ function renderBlock0Panel() {
   if (elements.block0ProfileCard) {
     elements.block0ProfileCard.classList.toggle("is-hidden", !vm.profile);
     elements.block0ProfileCard.innerHTML = vm.profile ? renderProfileCardHtml(vm.profile) : "";
+  }
+  var manuscriptOpenButton = document.getElementById("block0-manuscript-open");
+  if (manuscriptOpenButton) {
+    manuscriptOpenButton.addEventListener("click", handleBlock0ManuscriptOpenClick);
   }
 }
 
@@ -3395,11 +3646,28 @@ function setBlock0MemoryModalVisible(visible) {
     elements.block0MemoryModal.classList.toggle("is-hidden", !visible);
   }
   if (visible && elements.block0MemoryModalText) {
-    elements.block0MemoryModalText.textContent = BLOCK0_SPEC.memory.popupText || BLOCK0_SPEC.memory.text;
+    elements.block0MemoryModalText.textContent = buildBlock0FullDocumentLines().join("\n");
   }
   if (elements.block0MemoryModalNext) {
-    elements.block0MemoryModalNext.disabled = state.block1Started;
-    elements.block0MemoryModalNext.textContent = state.block1Started ? "다음 복구 진행 중" : "다음 복구 열기";
+    elements.block0MemoryModalNext.disabled = false;
+    elements.block0MemoryModalNext.textContent = "닫기";
+  }
+}
+
+function handleBlock0ManuscriptOpenClick() {
+  setBlock0MemoryModalVisible(true);
+}
+
+function handleBlock0MemoryModalBackdropClick(clickEvent) {
+  if (!elements.block0MemoryModal || clickEvent.target !== elements.block0MemoryModal) {
+    return;
+  }
+  setBlock0MemoryModalVisible(false);
+}
+
+function handleGlobalKeydown(keyEvent) {
+  if (keyEvent.key === "Escape" && elements.block0MemoryModal && !elements.block0MemoryModal.classList.contains("is-hidden")) {
+    setBlock0MemoryModalVisible(false);
   }
 }
 
@@ -3604,6 +3872,12 @@ function finalizeBlock0DragOperation() {
       hoveredSlots[hoveredIndex].classList.remove("is-drop-hover");
       hoveredIndex += 1;
     }
+    var activeSlots = elements.block0ClauseGrid.querySelectorAll(".block0-slot.is-drag-active");
+    var activeIndex = 0;
+    while (activeIndex < activeSlots.length) {
+      activeSlots[activeIndex].classList.remove("is-drag-active");
+      activeIndex += 1;
+    }
   }
   block0DraggedTag = "";
   block0DraggedTagIndex = -1;
@@ -3621,6 +3895,18 @@ function finalizeBlock0DragOperation() {
     index += 1;
   }
   clearBlock0FusionSlotHoverState();
+}
+
+function setBlock0ClauseDragState(active) {
+  if (!elements.block0ClauseGrid) {
+    return;
+  }
+  var slots = elements.block0ClauseGrid.querySelectorAll(".block0-slot[data-slot-key]");
+  var index = 0;
+  while (index < slots.length) {
+    slots[index].classList.toggle("is-drag-active", Boolean(active));
+    index += 1;
+  }
 }
 
 /** 인벤토리 태그 drag 시작. */
@@ -3648,6 +3934,7 @@ function handleBlock0InventoryDragStart(dragEvent) {
   markBlock0DragHint(state);
 
   setFusionDockDragState(block0DraggedTag);
+  setBlock0ClauseDragState(true);
   target.classList.add("is-dragging");
   if (dragEvent.dataTransfer) {
     dragEvent.dataTransfer.effectAllowed = "copyMove";
@@ -3736,10 +4023,7 @@ function handleBlock0FusionDockDrop(dragEvent) {
   clearBlock0FusionSlotHoverState();
 
   if (!block0FusionDraft.operator || operatorSlot) {
-    if (!startBlock0FusionDraft(block0DraggedTag)) {
-      logWarn("연산자 조각을 조합 영역에 먼저 놓으세요.");
-      return;
-    }
+    startBlock0FusionDraft(block0DraggedTag);
     renderBlock0Panel();
     touchPuzzleActivity(getActivePuzzlePrefix());
     finalizeBlock0DragOperation();
@@ -3747,7 +4031,6 @@ function handleBlock0FusionDockDrop(dragEvent) {
   }
 
   if (!tryApplyFusionTag(block0DraggedTag, Number.isInteger(slotIndex) ? slotIndex : -1)) {
-    logWarn("요구되는 조각 타입과 일치하지 않습니다.");
     return;
   }
   touchPuzzleActivity(getActivePuzzlePrefix());
@@ -3768,6 +4051,18 @@ function handleBlock0FusionDockDragOver(dragEvent) {
   if (hoveredSlot) {
     hoveredSlot.classList.add("is-drop-hover");
   }
+}
+
+function handleBlock0FusionDockDragLeave(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-fusion-slot") : null;
+  var related = dragEvent.relatedTarget instanceof Element ? dragEvent.relatedTarget.closest(".block0-fusion-slot") : null;
+  if (!slot) {
+    return;
+  }
+  if (related && related === slot) {
+    return;
+  }
+  slot.classList.remove("is-drop-hover");
 }
 
 function handleBlock0FusionDockClick(clickEvent) {
@@ -3816,21 +4111,43 @@ function tryExecuteBlock0Batch() {
 
 /** block0 일괄 복구 슬롯 dragover 처리. */
 function handleBlock0ClauseSlotDragOver(dragEvent) {
-  var slot = dragEvent.target ? dragEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-slot[data-slot-key]") : null;
   var prefix = getActivePuzzlePrefix();
   if (!slot || block0AnswerRecoveryActive || state[prefix + "Completed"] || !state[prefix + "ClauseVisible"]) {
     return;
   }
   dragEvent.preventDefault();
+  if (elements.block0ClauseGrid) {
+    var hovered = elements.block0ClauseGrid.querySelectorAll(".block0-slot.is-drop-hover");
+    var index = 0;
+    while (index < hovered.length) {
+      if (hovered[index] !== slot) {
+        hovered[index].classList.remove("is-drop-hover");
+      }
+      index += 1;
+    }
+  }
   if (dragEvent.dataTransfer) {
     dragEvent.dataTransfer.dropEffect = "copy";
   }
   slot.classList.add("is-drop-hover");
 }
 
+function handleBlock0ClauseSlotDragLeave(dragEvent) {
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-slot[data-slot-key]") : null;
+  var related = dragEvent.relatedTarget instanceof Element ? dragEvent.relatedTarget.closest(".block0-slot[data-slot-key]") : null;
+  if (!slot) {
+    return;
+  }
+  if (related && related === slot) {
+    return;
+  }
+  slot.classList.remove("is-drop-hover");
+}
+
 /** block0 일괄 복구 슬롯 drop 처리. */
 function handleBlock0ClauseSlotDrop(dragEvent) {
-  var slot = dragEvent.target ? dragEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var slot = dragEvent.target ? dragEvent.target.closest(".block0-slot[data-slot-key]") : null;
   var droppedTag = block0DraggedTag;
   var slotKey = slot && slot.dataset ? String(slot.dataset.slotKey || "") : "";
   var prefix = getActivePuzzlePrefix();
@@ -3858,7 +4175,7 @@ function handleBlock0ClauseSlotDrop(dragEvent) {
 
 /** block0 일괄 복구 슬롯 클릭 시 값을 비운다. */
 function handleBlock0ClauseSlotClick(clickEvent) {
-  var slot = clickEvent.target ? clickEvent.target.closest(".block0-clause-field .block0-slot[data-slot-key]") : null;
+  var slot = clickEvent.target ? clickEvent.target.closest(".block0-slot[data-slot-key]") : null;
   var slotKey = slot && slot.dataset ? String(slot.dataset.slotKey || "") : "";
   var prefix = getActivePuzzlePrefix();
   var answers = ensureBlock0ClauseAnswers();
@@ -3892,10 +4209,7 @@ function onBlock0FileOpened(path) {
 
 /** legacy 기억 조각 버튼 경로. */
 function handleBlock0MemoryModalNextClick() {
-  if (!state.block0MemoryUnlocked || state.block1Started) {
-    return;
-  }
-  startBlock1FromMemory();
+  setBlock0MemoryModalVisible(false);
 }
 
 /** 블록 1로 전환하고 첫 파일을 노출한다. */

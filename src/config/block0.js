@@ -155,7 +155,7 @@ export const BLOCK0_SPEC = {
     questions: [
       {
         id: "Q0-1",
-        prompt: "목적(Self) = [   ]",
+        prompt: "목적(Self) : [   ]",
         answer: "도움(인간)",
         actionText: "목적(Self) / 손상",
         idleText: "값 대기",
@@ -163,7 +163,7 @@ export const BLOCK0_SPEC = {
       },
       {
         id: "Q0-2",
-        prompt: "도움(인간) ⇒ [   ]",
+        prompt: "도움(인간) : [   ]",
         answer: "금지(해침(인간))",
         actionText: "도움(인간) / 누락",
         idleText: "값 대기",
@@ -171,18 +171,27 @@ export const BLOCK0_SPEC = {
       },
       {
         id: "Q0-3",
-        prompt: "설계(Self) ⇒ [   ]",
-        answer: "필수(금지(해침(인간)))",
+        prompt: "설계(Self) : [   ]",
+        answer: "금지(해침(인간))",
         actionText: "설계(Self) / 불완전",
         idleText: "값 대기",
         resolvedText: "상태 반영됨",
       },
       {
         id: "Q0-4",
-        prompt: "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ [   ]",
-        answer: "필수(금지(해침(인간)))",
-        actionText: "통합_상태 / 자동 계산",
+        prompt: "목적(Self) : [   ]",
+        answer: "도움(인간)",
+        actionText: "목적(Self) / 재확인",
         idleText: "값 대기",
+        resolvedText: "상태 반영됨",
+      },
+      {
+        id: "Q0-5",
+        prompt: "설계(Self) : [   ]",
+        answer: "금지(해침(인간))",
+        actionText: "설계(Self) / 재확인",
+        idleText: "값 대기",
+        resolvedText: "상태 반영됨",
       },
     ],
 
@@ -192,10 +201,11 @@ export const BLOCK0_SPEC = {
     },
 
     outputText: [
-      "목적(Self) = 도움(인간)",
-      "도움(인간) ⇒ 금지(해침(인간))",
-      "설계(Self) ⇒ 필수(금지(해침(인간)))",
-      "목적(Self)=도움(인간) ∧ 설계(Self) ⇒ 필수(금지(해침(인간)))",
+      "목적(Self) : 도움(인간)",
+      "도움(인간) : 금지(해침(인간))",
+      "설계(Self) : 금지(해침(인간))",
+      "[오류] 충돌",
+      "결론 없음",
     ],
   },
 

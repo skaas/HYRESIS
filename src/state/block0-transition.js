@@ -1,4 +1,4 @@
-export const BLOCK0_SLOT_KEYS = Object.freeze(["purpose", "mapping", "design"]);
+export const BLOCK0_SLOT_KEYS = Object.freeze(["purpose", "mapping", "design", "purposeEcho", "designEcho"]);
 
 export const BLOCK0_TRANSITION_ACTION = Object.freeze({
   SHOW_BATCH_CLAUSE: "SHOW_BATCH_CLAUSE",
@@ -28,6 +28,8 @@ function ensureClauseAnswers(state) {
       purpose: "",
       mapping: "",
       design: "",
+      purposeEcho: "",
+      designEcho: "",
     };
   }
   BLOCK0_SLOT_KEYS.forEach(function ensureKey(key) {
@@ -62,6 +64,8 @@ export function buildBlock0Snapshot(model) {
       purpose: String(answers.purpose || ""),
       mapping: String(answers.mapping || ""),
       design: String(answers.design || ""),
+      purposeEcho: String(answers.purposeEcho || ""),
+      designEcho: String(answers.designEcho || ""),
     },
     block0SolvedAnswers: Array.isArray(current.state.block0SolvedAnswers)
       ? current.state.block0SolvedAnswers.slice()
@@ -81,7 +85,7 @@ export function assertBlock0TransitionInvariants(model, options) {
     }
   });
 
-  if (!state.block0ClauseVisible && (answers.purpose || answers.mapping || answers.design)) {
+  if (!state.block0ClauseVisible && (answers.purpose || answers.mapping || answers.design || answers.purposeEcho || answers.designEcho)) {
     throw new Error("Block0 invariant violated: hidden batch clause must keep all slot values empty.");
   }
 

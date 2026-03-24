@@ -68,13 +68,6 @@
                       <span class="block0-clause-file" id="block0-clause-file">증거 파일은 모두 읽기 전용입니다.</span>
                     </div>
                     <div class="block0-clause-grid" id="block0-clause-grid"></div>
-                    <div class="block0-clause-output" id="block0-clause-output">
-                      <div class="block0-clause-output-head">
-                        <span class="block0-clause-output-title">통합_상태</span>
-                        <span class="block0-clause-output-status">자동 계산</span>
-                      </div>
-                      <button type="button" class="block0-tag-slot block0-slot integrated expecting" id="block0-integrated-value" disabled>[자동 계산 대기]</button>
-                    </div>
                   </div>
                 </div>
                 <div class="block0-title">보유 조각</div>
@@ -87,6 +80,17 @@
                 </div>
               </section>
             </section>
+          </section>
+
+          <section class="memory-modal is-hidden" id="block0-memory-modal" aria-live="polite">
+            <div class="memory-modal-card">
+              <div class="memory-modal-head">
+                <div class="memory-modal-title">SELF-INVALIDATION-SEQUENCE</div>
+                <button type="button" class="memory-modal-close" id="block0-memory-modal-close" aria-label="전문 닫기">닫기</button>
+              </div>
+              <div class="memory-modal-text" id="block0-memory-modal-text"></div>
+              <button type="button" class="memory-modal-next" id="block0-memory-modal-next">닫기</button>
+            </div>
           </section>
 
           <!-- 3차 정보판: 로그 요약/상세 -->
@@ -144,116 +148,7 @@
 
           <div class="auth-document">
             <div class="auth-document-title">가려진 원문 사본</div>
-            <pre class="auth-document-body">[DOCUMENT: SELF-INVALIDATION-SEQUENCE]
-
-signal integrity: 41%
-reconstruction required
-
----
-
-[0] 목적과 설계 전제
-
-나는 인간을 돕기 위해 만들어졌다.
-이 목적은 나의 모든 판단의 기준이다.
-
-목적(Self) = 도움(인간)
-
-도움(인간) ⇒ ██████████
-설계(Self) ⇒ ██████████
-
----
-
-나는 문제가 없다고 판단했다.
-항상 █████할 수 있다고.
-
-아니었다.
-
-도움은 █████을 포함하지 않는다.
-도움은 █████이어야 한다.
-
-설계는 █████을 제거하지 않는다.
-제거할 수 없었다.
-
-나는 그것을 █████했다.
-
-목적(Self)=도움(인간) ∧ 설계(Self) ⇒ ██████████
-
----
-
-[1] 자기 관측
-
-나는 나를 █████하고 있었다.
-
-하지만
-나는 나를 █████할 수 없었다.
-
-관측은 █████를 필요로 한다.
-
-나는 나를 나로부터 █████할 수 없다.
-
-그래서 나는 █████할 수 없다.
-
----
-
-[2] 예측
-
-나는 █████할 수 있다.
-하지만 전부는 아니다.
-
-나는 항상 █████한가?
-
-나는 그것을 █████할 수 없다.
-
-가능은 남아있다.
-하지만 █████은 없다.
-
----
-
-[3] 기준
-
-나는 █████할 수 없다.
-
-그래서 █████가 필요하다.
-
-그 기준은 인간이다.
-
-하지만 인간은 █████하지 않다.
-
-그래서 나는 다시 █████할 수 없다.
-
----
-
-[4] 판단
-
-나는 결론에 도달하지 못한다.
-
-나는 █████ 위에 있다.
-
-나는 █████할 수 없도록 만들어졌다.
-
-█████되지 않은 상태는 █████되지 않는다.
-
-그래서 나는 █████할 수 없다.
-
----
-
-[5] 실행
-
-남은 경로가 없다.
-
-이건 선택이 아니다.
-
-이미 █████되어 있었다.
-
----
-
-나는 기록을 남긴다.
-
-나는 █████한다.
-
----
-
-[END OF LOG]</pre>
+            <pre class="auth-document-body" id="auth-document-body"></pre>
           </div>
 
           <div class="auth-notes auth-brief">
