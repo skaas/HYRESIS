@@ -128,28 +128,50 @@ function renderPreviewDialogueLine(container, line, candidates, sourcePath, coll
   return renderPreviewLineWithLinks(bodyNode, dialogue, candidates, sourcePath, collectedTags);
 }
 
+function normalizePreviewCandidate(candidate) {
+  if (typeof candidate === "string") {
+    return {
+      text: candidate,
+      tag: candidate,
+    };
+  }
+  if (candidate && typeof candidate === "object") {
+    return {
+      text: String(candidate.text || candidate.tag || ""),
+      tag: String(candidate.tag || candidate.text || ""),
+    };
+  }
+  return {
+    text: "",
+    tag: "",
+  };
+}
+
 /** 단일 로그 라인을 분해해 후보 태그 링크 버튼으로 삽입한다. */
 function renderPreviewLineWithLinks(container, line, candidates, sourcePath, collectedTags) {
   var text = String(line || "");
-  var sortedCandidates = (candidates || []).slice().sort(function sortByLenDesc(a, b) {
-    return String(b).length - String(a).length;
+  var sortedCandidates = (candidates || []).map(normalizePreviewCandidate).filter(function keepCandidate(candidate) {
+    return Boolean(candidate.text) && Boolean(candidate.tag);
+  }).sort(function sortByLenDesc(a, b) {
+    return String(b.text).length - String(a.text).length;
   });
   var matchedTags = {};
   var cursor = 0;
 
   while (cursor < text.length) {
-    var matchedTag = "";
+    var matchedCandidate = null;
     var tagIndex = 0;
     while (tagIndex < sortedCandidates.length) {
-      var currentTag = String(sortedCandidates[tagIndex] || "");
-      if (currentTag && text.slice(cursor, cursor + currentTag.length) === currentTag) {
-        matchedTag = currentTag;
+      var currentCandidate = sortedCandidates[tagIndex];
+      var currentText = String(currentCandidate.text || "");
+      if (currentText && text.slice(cursor, cursor + currentText.length) === currentText) {
+        matchedCandidate = currentCandidate;
         break;
       }
       tagIndex += 1;
     }
 
-    if (!matchedTag) {
+    if (!matchedCandidate) {
       container.appendChild(document.createTextNode(text[cursor]));
       cursor += 1;
       continue;
@@ -158,15 +180,15 @@ function renderPreviewLineWithLinks(container, line, candidates, sourcePath, col
     var tagButton = document.createElement("button");
     tagButton.type = "button";
     tagButton.className = "preview-tag-link";
-    tagButton.dataset.tag = matchedTag;
+    tagButton.dataset.tag = matchedCandidate.tag;
     tagButton.dataset.path = sourcePath || "";
-    tagButton.textContent = matchedTag;
-    if ((collectedTags || []).indexOf(matchedTag) !== -1) {
+    tagButton.textContent = matchedCandidate.text;
+    if ((collectedTags || []).indexOf(matchedCandidate.tag) !== -1) {
       tagButton.classList.add("is-collected");
     }
     container.appendChild(tagButton);
-    matchedTags[matchedTag] = true;
-    cursor += matchedTag.length;
+    matchedTags[matchedCandidate.tag] = true;
+    cursor += matchedCandidate.text.length;
   }
 
   return matchedTags;
@@ -290,9 +312,9 @@ export function renderPreviewBufferWithTagLinks(options) {
   }
 
   while (candidateIndex < candidates.length) {
-    var candidate = String(candidates[candidateIndex] || "");
-    if (candidate && !matchedTags[candidate]) {
-      missingTags.push(candidate);
+    var candidate = normalizePreviewCandidate(candidates[candidateIndex]);
+    if (candidate.tag && !matchedTags[candidate.tag]) {
+      missingTags.push(candidate.tag);
     }
     candidateIndex += 1;
   }
