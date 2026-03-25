@@ -208,10 +208,6 @@ export function renderPreviewBufferWithTagLinks(options) {
   var lineIndex = 0;
   var matchedTags = {};
   var matchedInLine = null;
-  var candidateIndex = 0;
-  var missingTags = [];
-  var fallbackRow = null;
-  var title = null;
   var inProjectionNote = false;
   var lineKind = "";
   var speakerProfiles = (options && options.speakerProfiles) || {};
@@ -309,38 +305,6 @@ export function renderPreviewBufferWithTagLinks(options) {
     });
     body.appendChild(row);
     lineIndex += 1;
-  }
-
-  while (candidateIndex < candidates.length) {
-    var candidate = normalizePreviewCandidate(candidates[candidateIndex]);
-    if (candidate.tag && !matchedTags[candidate.tag]) {
-      missingTags.push(candidate.tag);
-    }
-    candidateIndex += 1;
-  }
-
-  if (missingTags.length > 0) {
-    fallbackRow = document.createElement("div");
-    fallbackRow.className = "preview-recovery-note";
-    title = document.createElement("span");
-    title.textContent = "추출 가능 조각: ";
-    fallbackRow.appendChild(title);
-    missingTags.forEach(function appendFallbackTag(tag, idx) {
-      var tagButton = document.createElement("button");
-      tagButton.type = "button";
-      tagButton.className = "preview-tag-link";
-      tagButton.dataset.tag = tag;
-      tagButton.dataset.path = path || "";
-      tagButton.textContent = tag;
-      if ((collectedTags || []).indexOf(tag) !== -1) {
-        tagButton.classList.add("is-collected");
-      }
-      fallbackRow.appendChild(tagButton);
-      if (idx < missingTags.length - 1) {
-        fallbackRow.appendChild(document.createTextNode(" "));
-      }
-    });
-    shell.appendChild(fallbackRow);
   }
 
   container.appendChild(shell);

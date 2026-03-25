@@ -27,7 +27,7 @@ export const state = {
   block0Started: false,
   block0Completed: false,
   block0Integrity: 12,
-  block0VisibleFiles: ["부팅.log"],
+  block0VisibleFiles: ["프로젝트-킥오프.log"],
   block0CollectedTags: [],
   block0ClauseVisible: false,
   block0ClauseAnswers: {

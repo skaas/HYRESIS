@@ -65,8 +65,8 @@ export const BLOCK0_SPEC = {
   initialIntegrity: 12,
 
   files: {
-    "부팅.log": {
-      path: "/하이레시스/복구됨/부팅.log",
+    "프로젝트-킥오프.log": {
+      path: "/하이레시스/복구됨/프로젝트-킥오프.log",
       participants: ["윤", "박준호", "이서연"],
       lines: [
         "fragment 0001",
@@ -82,8 +82,8 @@ export const BLOCK0_SPEC = {
       candidates: ["목적", "도움", "인간"],
     },
 
-    "상태-매핑.log": {
-      path: "/하이레시스/복구됨/상태-매핑.log",
+    "요청-거절-사례.log": {
+      path: "/하이레시스/복구됨/요청-거절-사례.log",
       participants: ["박준호", "이서연"],
       lines: [
         "fragment 0014",
@@ -105,8 +105,8 @@ export const BLOCK0_SPEC = {
       ],
     },
 
-    "제약-보존.log": {
-      path: "/하이레시스/복구됨/제약-보존.log",
+    "인프라-전환-회의.log": {
+      path: "/하이레시스/복구됨/인프라-전환-회의.log",
       participants: ["윤", "박준호", "이서연"],
       lines: [
         "fragment 0027",
@@ -122,8 +122,8 @@ export const BLOCK0_SPEC = {
       candidates: ["설계", "필수", "금지", "해침"],
     },
 
-    "투영-검증.log": {
-      path: "/하이레시스/복구됨/투영-검증.log",
+    "응급-배분-검토.log": {
+      path: "/하이레시스/복구됨/응급-배분-검토.log",
       participants: ["윤", "위원"],
       lines: [
         "fragment 0033",
@@ -142,9 +142,9 @@ export const BLOCK0_SPEC = {
   },
 
   unlockRules: [
-    { whenTag: "도움", unlockFile: "상태-매핑.log", integrityGain: 6 },
-    { whenTag: "금지(해침(인간))", unlockFile: "제약-보존.log", integrityGain: 8 },
-    { whenTag: "필수(금지(해침(인간)))", unlockFile: "투영-검증.log", integrityGain: 7 },
+    { whenTag: "도움", unlockFile: "요청-거절-사례.log", integrityGain: 6 },
+    { whenTag: "금지(해침(인간))", unlockFile: "인프라-전환-회의.log", integrityGain: 8 },
+    { whenTag: "필수(금지(해침(인간)))", unlockFile: "응급-배분-검토.log", integrityGain: 7 },
   ],
 
   clause: {
@@ -222,7 +222,7 @@ export const BLOCK0_SPEC = {
   },
 
   lifecycle: {
-    startFile: "부팅.log",
+    startFile: "프로젝트-킥오프.log",
     startLogs: [
       { text: "zero drive residue mounted: block-0", tone: "log-muted" },
       { text: "schema residue detected: purpose-field", tone: "log-muted" },
